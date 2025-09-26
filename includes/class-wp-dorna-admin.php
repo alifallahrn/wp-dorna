@@ -73,7 +73,7 @@ class WP_Dorna_Admin
 
         add_settings_field(
             'api_key',
-            'کلید API',
+            'توکن',
             array($this, 'api_key_callback'),
             'wp-dorna-settings',
             'wp_dorna_main_section'
