@@ -1,7 +1,7 @@
 <?php
 /*
 Plugin Name: WP Dorna
-Plugin URI: https://dornaapp.ir
+Plugin URI: https://github.com/alifallahrn/wp-dorna
 Description: افزونه اتصال ووکامرس به پلتفرم درنا
 Version: 1.0.0
 Author: Ali Fallah
