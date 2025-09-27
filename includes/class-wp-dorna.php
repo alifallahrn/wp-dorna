@@ -53,6 +53,9 @@ class WP_Dorna
 
             $existing_product_id = wc_get_product_id_by_sku($product['sku']);
 
+            // change price unit from rials to tomans
+            $product['sale_price'] = $product['sale_price'] / 10;
+
             if (!empty($existing_product_id)) {
                 $wc_product = wc_get_product($existing_product_id);
                 if ($wc_product) {
@@ -81,15 +84,24 @@ class WP_Dorna
         $order = wc_get_order($order_id);
         $api = new WP_Dorna_API();
 
+        $state_code = $order->get_billing_state();
+        $country    = $order->get_billing_country();
+        $states     = WC()->countries->get_states( $country );
+        $state_name = isset( $states[ $state_code ] ) ? $states[ $state_code ] : $state_code;
+
+        $city_name  = function_exists('pw_get_city_name')
+            ? pw_get_city_name( $state_code, $order->get_billing_city() )
+            : $order->get_billing_city();
+
         $invoice_data = array(
             'customer' => [
                 'name' => $order->get_billing_first_name() . ' ' . $order->get_billing_last_name(),
                 'mobile' => $order->get_billing_phone(),
                 'email' => $order->get_billing_email(),
-                'address' => $order->get_billing_state() . ' - ' . $order->get_billing_city() . ' - ' . $order->get_billing_address_1(),
+                'address' => $state_name . ' - ' . $city_name . ' - ' . $order->get_billing_address_1(),
             ],
             'items'          => array(),
-            'total'          => $order->get_total(),
+            'total'          => ($order->get_total() * 10), // convert to rials
             'order_id'       => $order->get_id(),
             'order_status'   => $order->get_status(),
             'payment_method' => $order->get_payment_method_title(),
@@ -107,7 +119,7 @@ class WP_Dorna
                 'name'     => $item->get_name(),
                 'sku'      => $product->get_sku(),
                 'quantity' => $item->get_quantity(),
-                'price'    => $item->get_total() / $item->get_quantity(),
+                'price'    => ($item->get_total() / $item->get_quantity()) * 10, // convert to rials
             );
         }
 

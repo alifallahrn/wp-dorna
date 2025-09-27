@@ -48,6 +48,9 @@ class WP_Dorna_Admin
             wp_send_json_error(array('message' => 'کالا با این کد کالا قبلا وارد شده است: ' . $product_data['sku']));
         }
 
+        // change price unit from rials to tomans
+        $product_data['sale_price'] = $product_data['sale_price'] / 10;
+
         $new_product = new WC_Product_Simple();
         $new_product->set_name($product_data['name']);
         $new_product->set_sku($product_data['sku']);
