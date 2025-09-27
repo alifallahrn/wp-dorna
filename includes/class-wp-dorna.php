@@ -31,11 +31,10 @@ class WP_Dorna
         set_time_limit(0);
         $api = new WP_Dorna_API();
         $products = $api->get_data($api::PRODUCTS_ENDPOINT);
-        $this->log_error('WP Dorna: Fetched ' . (is_array($products) ? count($products) : '0') . ' products from API.');
 
-        if (isset($products['error'])) {
-            $this->log_error('WP Dorna API Error: ' . $products['error']);
-            return;
+        if (is_wp_error($products)) {
+            $this->log_error('WP Dorna API Error: ' . $products->get_error_message());
+            wp_send_json_error(array('message' => $products->get_error_message()), 400);
         }
 
         if (!is_array($products)) {
@@ -54,13 +53,7 @@ class WP_Dorna
             }
 
             $existing_product_id = wc_get_product_id_by_sku($product['sku']);
-            if ($existing_product_id === 0) {
-                $this->log_error('WP Dorna Notice: Product with SKU ' . $product['sku'] . ' not found in WooCommerce. It will be created.');
-            } else {
-                $this->log_error('WP Dorna Notice: Updating product with SKU ' . $product['sku'] . ' (ID: ' . $existing_product_id . ')');
-            }
 
-            // change price unit from rials to tomans
             $product['sale_price'] = $product['sale_price'] / 10;
 
             if (!empty($existing_product_id)) {
@@ -99,7 +92,7 @@ class WP_Dorna
                 'address' => $state_name . ' - ' . $city_name . ' - ' . $order->get_billing_address_1(),
             ],
             'items'          => array(),
-            'total'          => ($order->get_total() * 10), // convert to rials
+            'total'          => ($order->get_total() * 10),
             'order_id'       => $order->get_id(),
             'order_status'   => $order->get_status(),
             'payment_method' => $order->get_payment_method_title(),
@@ -117,15 +110,15 @@ class WP_Dorna
                 'name'     => $item->get_name(),
                 'sku'      => $product->get_sku(),
                 'quantity' => $item->get_quantity(),
-                'price'    => ($item->get_total() / $item->get_quantity()) * 10, // convert to rials
+                'price'    => ($item->get_total() / $item->get_quantity()) * 10,
             );
         }
 
         $response = $api->post_data($api::INVOICES_ENDPOINT, $invoice_data);
-        $this->log_error('WP Dorna API Response: ' . print_r($response, true));
 
-        if (isset($response['error'])) {
-            $this->log_error('WP Dorna API Error: ' . $response['error']);
+        if (is_wp_error($response)) {
+            $this->log_error('WP Dorna API Error: ' . $response->get_error_message());
+            return;
         }
     }
 

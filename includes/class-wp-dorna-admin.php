@@ -17,13 +17,13 @@ class WP_Dorna_Admin
 
         $api = new WP_Dorna_API();
         $products = $api->get_data($api::PRODUCTS_ENDPOINT);
-        $this->log_error('WP Dorna: Fetched ' . (is_array($products) ? count($products) : '0') . ' products from API.');
 
         if (is_wp_error($products)) {
+            $this->log_error('WP Dorna API Error: ' . $products->get_error_message());
             wp_send_json_error(array('message' => $products->get_error_message()), 400);
-        } else {
-            wp_send_json_success($products);
         }
+        
+        wp_send_json_success($products);
     }
 
     public function ajax_import_product()

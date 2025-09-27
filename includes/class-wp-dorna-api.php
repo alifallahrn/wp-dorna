@@ -53,7 +53,7 @@ class WP_Dorna_API
         ));
 
         if (is_wp_error($response)) {
-            return array('error' => $response->get_error_message());
+            return new WP_Error('api_error', $response->get_error_message());
         }
 
         return json_decode($response['body'], true);
