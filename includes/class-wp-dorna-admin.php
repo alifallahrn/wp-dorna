@@ -178,20 +178,20 @@ class WP_Dorna_Admin
                                 var imported = 0;
 
                                 if (total === 0) {
-                                    $status.html('کالایی در درنا پیدا نشد.');
+                                    $status.html('<br>هیچ کالایی در درنا وجود ندارد.');
                                     $button.removeAttr('disabled');
                                     return;
                                 }
 
-                                $status.html('<br>کالاها دریافت شدند. مجموع کالاها: ' + total);
+                                $status.html('<br>تعداد کل کالاها در درنا: ' + total);
 
                                 if (import_count === 0) {
-                                    $status.html('<br>تمامی کالاها قبلا وارد شده‌اند.');
+                                    $status.html('<br>کالای جدیدی برای وارد کردن وجود ندارد.');
                                     $button.removeAttr('disabled');
                                     return;
                                 }
-                                
-                                $status.append('<br>در حال ایجاد ' + import_count + ' کالای جدید هستیم');
+
+                                $status.append('<br>تعداد کالاهای جدید برای وارد کردن: ' + import_count);
 
                                 function importNextProduct() {
                                     if (products.length === 0) {
@@ -228,12 +228,12 @@ class WP_Dorna_Admin
 
                                 importNextProduct();
                             } else {
-                                $status.html('خطا در دریافت کالاها از درنا: ' + response.data.message);
+                                $status.html('<br>خطایی هنگام دریافت کالاها از درنا رخ داد: ' + response.data.message);
                                 $button.removeAttr('disabled');
                             }
                         },
                         error: function() {
-                            $status.html('خطایی هنگام دریافت کالاها از درنا رخ داد.');
+                            $status.html('<br>خطایی هنگام دریافت کالاها از درنا رخ داد.');
                             $button.removeAttr('disabled');
                         }
                     });
