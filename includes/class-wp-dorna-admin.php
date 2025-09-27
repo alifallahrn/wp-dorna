@@ -74,6 +74,7 @@ class WP_Dorna_Admin
         $product_data['sale_price'] = $product_data['sale_price'] / 10;
 
         $new_product = new WC_Product_Simple();
+        $new_product->set_status('draft');
         $new_product->set_name($product_data['name']);
         $new_product->set_sku($product_data['sku']);
         $new_product->set_price($product_data['sale_price']);

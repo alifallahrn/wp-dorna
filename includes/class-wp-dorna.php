@@ -62,7 +62,6 @@ class WP_Dorna
                     $wc_product->set_name($product['name']);
                     $wc_product->set_price($product['sale_price']);
                     $wc_product->set_regular_price($product['sale_price']);
-                    $wc_product->set_manage_stock(true);
                     $wc_product->set_stock_quantity($product['stock']);
                     $wc_product->save();
                 }
