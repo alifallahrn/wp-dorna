@@ -17,6 +17,7 @@ class WP_Dorna_Admin
 
         $api = new WP_Dorna_API();
         $products = $api->get_data($api::PRODUCTS_ENDPOINT);
+        $this->log_error('WP Dorna: Fetched ' . (is_array($products) ? count($products) : '0') . ' products from API.');
 
         if (is_wp_error($products)) {
             wp_send_json_error(array('message' => $products->get_error_message()), 400);
@@ -30,13 +31,20 @@ class WP_Dorna_Admin
         check_ajax_referer('wp_dorna_import_product_nonce');
 
         if (!isset($_POST['product']) || empty($_POST['product'])) {
+            $this->log_error('WP Dorna: No product data provided.');
             wp_send_json_error(array('message' => 'No product data provided.'));
         }
 
         $product_data = json_decode(stripslashes($_POST['product']), true);
 
         if (empty($product_data) || !is_array($product_data)) {
+            $this->log_error('WP Dorna: Invalid product data.');
             wp_send_json_error(array('message' => 'Invalid product data.'));
+        }
+
+        if (!isset($product_data['sku']) || empty($product_data['sku'])) {
+            $this->log_error('WP Dorna: Product SKU is required.');
+            wp_send_json_error(array('message' => 'Product SKU is required.'));
         }
 
         $existing_products = wc_get_products(array(
@@ -59,6 +67,8 @@ class WP_Dorna_Admin
         $new_product->set_manage_stock(true);
         $new_product->set_stock_quantity($product_data['stock']);
         $new_product->save();
+
+        $this->log_error('WP Dorna: Product ' . $product_data['name'] . ' imported successfully.');
 
         wp_send_json_success(array('message' => 'کالا ' . $product_data['name'] . ' با موفقیت وارد شد.'));
     }
@@ -117,6 +127,18 @@ class WP_Dorna_Admin
             <h2>وارد کردن محصولات</h2>
             <button id="wp-dorna-import-products" class="button button-primary">وارد کردن محصولات از درنا</button>
             <div id="wp-dorna-import-status"></div>
+
+            <h2>لاگ خطاهای امروز</h2>
+            <pre id="wp-dorna-error-log" dir="ltr" style="background: #f1f1f1; border: 1px solid #ccc; padding: 10px; max-height: 300px; overflow: auto;">
+                <?php
+                $log_file = WP_DORNA_PLUGIN_DIR . 'logs/' . date('Y-m-d') . '.log';
+                if (file_exists($log_file)) {
+                    echo esc_html(file_get_contents($log_file));
+                } else {
+                    echo 'لاگ خطایی وجود ندارد.';
+                }
+                ?>
+            </pre>
         </div>
 
         <script>
@@ -196,5 +218,12 @@ class WP_Dorna_Admin
             });
         </script>
 <?php
+    }
+
+    // save error logs to files day to day in plugin folder
+    public function log_error($message)
+    {
+        $log_file = WP_DORNA_PLUGIN_DIR . 'logs/' . date('Y-m-d') . '.log';
+        error_log('[' . date('Y-m-d H:i:s') . '] ' . $message . "\n", 3, $log_file);
     }
 }

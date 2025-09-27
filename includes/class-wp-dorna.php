@@ -30,19 +30,20 @@ class WP_Dorna
     {
         $api = new WP_Dorna_API();
         $products = $api->get_data($api::PRODUCTS_ENDPOINT);
+        $this->log_error('WP Dorna: Fetched ' . (is_array($products) ? count($products) : '0') . ' products from API.');
 
         if (isset($products['error'])) {
-            error_log('WP Dorna API Error: ' . $products['error']);
+            $this->log_error('WP Dorna API Error: ' . $products['error']);
             return;
         }
 
         if (!is_array($products)) {
-            error_log('WP Dorna API Error: Invalid products data');
+            $this->log_error('WP Dorna API Error: Invalid products data');
             return;
         }
 
         if (empty($products)) {
-            error_log('WP Dorna API Notice: No products found to update');
+            $this->log_error('WP Dorna API Notice: No products found to update');
             return;
         }
 
@@ -52,6 +53,11 @@ class WP_Dorna
             }
 
             $existing_product_id = wc_get_product_id_by_sku($product['sku']);
+            if ($existing_product_id === 0) {
+                $this->log_error('WP Dorna Notice: Product with SKU ' . $product['sku'] . ' not found in WooCommerce. It will be created.');
+            } else {
+                $this->log_error('WP Dorna Notice: Updating product with SKU ' . $product['sku'] . ' (ID: ' . $existing_product_id . ')');
+            }
 
             // change price unit from rials to tomans
             $product['sale_price'] = $product['sale_price'] / 10;
@@ -124,9 +130,17 @@ class WP_Dorna
         }
 
         $response = $api->post_data($api::INVOICES_ENDPOINT, $invoice_data);
+        $this->log_error('WP Dorna API Response: ' . print_r($response, true));
 
         if (isset($response['error'])) {
-            error_log('WP Dorna API Error: ' . $response['error']);
+            $this->log_error('WP Dorna API Error: ' . $response['error']);
         }
+    }
+
+    // save error logs to files day to day in plugin folder
+    public function log_error($message)
+    {
+        $log_file = WP_DORNA_PLUGIN_DIR . 'logs/' . date('Y-m-d') . '.log';
+        error_log('[' . date('Y-m-d H:i:s') . '] ' . $message . "\n", 3, $log_file);
     }
 }
