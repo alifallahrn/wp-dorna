@@ -28,6 +28,7 @@ class WP_Dorna
 
     public function update_products()
     {
+        set_time_limit(0);
         $api = new WP_Dorna_API();
         $products = $api->get_data($api::PRODUCTS_ENDPOINT);
         $this->log_error('WP Dorna: Fetched ' . (is_array($products) ? count($products) : '0') . ' products from API.');
@@ -72,15 +73,6 @@ class WP_Dorna
                     $wc_product->set_stock_quantity($product['stock']);
                     $wc_product->save();
                 }
-            } else {
-                $new_product = new WC_Product_Simple();
-                $new_product->set_name($product['name']);
-                $new_product->set_sku($product['sku']);
-                $new_product->set_price($product['sale_price']);
-                $new_product->set_regular_price($product['sale_price']);
-                $new_product->set_manage_stock(true);
-                $new_product->set_stock_quantity($product['stock']);
-                $new_product->save();
             }
         }
     }
