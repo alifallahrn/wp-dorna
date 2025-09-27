@@ -36,7 +36,7 @@ class WP_Dorna_Admin
         }
 
         wp_send_json_success([
-            'total'    => count($new_products),
+            'total'    => count($products),
             'products' => $new_products,
         ]);
     }
@@ -183,13 +183,14 @@ class WP_Dorna_Admin
                                     return;
                                 }
 
+                                $status.html('<br>کالاها دریافت شدند. مجموع کالاها: ' + total);
+
                                 if (import_count === 0) {
-                                    $status.html('تمامی کالاها قبلا وارد شده‌اند. کالای جدیدی برای وارد کردن وجود ندارد.');
+                                    $status.html('<br>تمامی کالاها قبلا وارد شده‌اند.');
                                     $button.removeAttr('disabled');
                                     return;
                                 }
-
-                                $status.html('کالاها دریافت شدند. مجموع کالاها: ' + total);
+                                
                                 $status.append('<br>در حال ایجاد ' + import_count + ' کالای جدید هستیم');
 
                                 function importNextProduct() {
