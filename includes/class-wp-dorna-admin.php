@@ -178,15 +178,15 @@ class WP_Dorna_Admin
                                 var imported = 0;
 
                                 if (total === 0) {
-                                    $status.html('<br>هیچ کالایی در درنا وجود ندارد.');
+                                    $status.append('<br>هیچ کالایی در درنا وجود ندارد.');
                                     $button.removeAttr('disabled');
                                     return;
                                 }
 
-                                $status.html('<br>تعداد کل کالاها در درنا: ' + total);
+                                $status.append('<br>تعداد کل کالاها در درنا: ' + total);
 
                                 if (import_count === 0) {
-                                    $status.html('<br>کالای جدیدی برای وارد کردن وجود ندارد.');
+                                    $status.append('<br>کالای جدیدی برای وارد کردن وجود ندارد.');
                                     $button.removeAttr('disabled');
                                     return;
                                 }
@@ -228,12 +228,12 @@ class WP_Dorna_Admin
 
                                 importNextProduct();
                             } else {
-                                $status.html('<br>خطایی هنگام دریافت کالاها از درنا رخ داد: ' + response.data.message);
+                                $status.append('<br>خطایی هنگام دریافت کالاها از درنا رخ داد: ' + response.data.message);
                                 $button.removeAttr('disabled');
                             }
                         },
                         error: function() {
-                            $status.html('<br>خطایی هنگام دریافت کالاها از درنا رخ داد.');
+                            $status.append('<br>خطایی هنگام دریافت کالاها از درنا رخ داد.');
                             $button.removeAttr('disabled');
                         }
                     });
