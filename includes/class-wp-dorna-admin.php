@@ -22,8 +22,23 @@ class WP_Dorna_Admin
             $this->log_error('WP Dorna API Error: ' . $products->get_error_message());
             wp_send_json_error(array('message' => $products->get_error_message()), 400);
         }
-        
-        wp_send_json_success($products);
+
+        $new_products = array();
+        foreach ($products as $product) {
+            if (!isset($product['sku'])) {
+                continue;
+            }
+
+            $existing_product_id = wc_get_product_id_by_sku($product['sku']);
+            if (empty($existing_product_id)) {
+                $new_products[] = $product;
+            }
+        }
+
+        wp_send_json_success([
+            'total'    => count($new_products),
+            'products' => $new_products,
+        ]);
     }
 
     public function ajax_import_product()
@@ -56,7 +71,6 @@ class WP_Dorna_Admin
             wp_send_json_error(array('message' => 'کالا با این کد کالا قبلا وارد شده است.'));
         }
 
-        // change price unit from rials to tomans
         $product_data['sale_price'] = $product_data['sale_price'] / 10;
 
         $new_product = new WC_Product_Simple();
@@ -126,7 +140,7 @@ class WP_Dorna_Admin
             </form>
             <h2>وارد کردن محصولات</h2>
             <button id="wp-dorna-import-products" class="button button-primary">وارد کردن محصولات از درنا</button>
-            <div id="wp-dorna-import-status" style="background: #f9f9f9; border: 1px solid #ccc; padding: 10px; max-height: 300px; overflow: auto;"></div>
+            <div id="wp-dorna-import-status" style="background: #f1f1f1; border: 1px solid #ccc; padding: 10px; max-height: 300px; overflow: auto; margin-top: 10px;"></div>
             <br><br>
             <h2>لاگ خطاهای امروز</h2>
             <pre id="wp-dorna-error-log" dir="ltr" style="background: #f1f1f1; border: 1px solid #ccc; padding: 10px; max-height: 300px; overflow: auto;">
@@ -158,8 +172,9 @@ class WP_Dorna_Admin
                         },
                         success: function(response) {
                             if (response.success) {
-                                var products = response.data;
-                                var total = products.length;
+                                var products = response.data.products;
+                                var import_count = products.length;
+                                var total = response.data.total;
                                 var imported = 0;
 
                                 if (total === 0) {
@@ -168,7 +183,14 @@ class WP_Dorna_Admin
                                     return;
                                 }
 
-                                $status.html('در حال وارد کردن ' + total + ' کالا ...');
+                                if (import_count === 0) {
+                                    $status.html('تمامی کالاها قبلا وارد شده‌اند. کالای جدیدی برای وارد کردن وجود ندارد.');
+                                    $button.removeAttr('disabled');
+                                    return;
+                                }
+
+                                $status.html('کالاها دریافت شدند. مجموع کالاها: ' + total);
+                                $status.append('<br>در حال ایجاد ' + import_count + ' کالای جدید هستیم');
 
                                 function importNextProduct() {
                                     if (products.length === 0) {
@@ -190,7 +212,7 @@ class WP_Dorna_Admin
                                         success: function(importResponse) {
                                             if (importResponse.success) {
                                                 imported++;
-                                                $status.html('وارد شده ' + imported + ' از ' + total + ' کالا ...');
+                                                $status.append('<br>کالا با کد ' + product.sku + ' با موفقیت وارد شد. (' + imported + '/' + import_count + ')');
                                             } else {
                                                 $status.append('<br>خطا در وارد کردن کالا با کد ' + product.sku + ': ' + importResponse.data.message);
                                             }
