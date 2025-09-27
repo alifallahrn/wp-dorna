@@ -53,7 +53,7 @@ class WP_Dorna_Admin
         ));
 
         if (!empty($existing_products)) {
-            wp_send_json_error(array('message' => 'کالا با این کد کالا قبلا وارد شده است: ' . $product_data['sku']));
+            wp_send_json_error(array('message' => 'کالا با این کد کالا قبلا وارد شده است.'));
         }
 
         // change price unit from rials to tomans
@@ -126,8 +126,8 @@ class WP_Dorna_Admin
             </form>
             <h2>وارد کردن محصولات</h2>
             <button id="wp-dorna-import-products" class="button button-primary">وارد کردن محصولات از درنا</button>
-            <div id="wp-dorna-import-status"></div>
-
+            <div id="wp-dorna-import-status" style="background: #f9f9f9; border: 1px solid #ccc; padding: 10px; max-height: 300px; overflow: auto;"></div>
+            <br><br>
             <h2>لاگ خطاهای امروز</h2>
             <pre id="wp-dorna-error-log" dir="ltr" style="background: #f1f1f1; border: 1px solid #ccc; padding: 10px; max-height: 300px; overflow: auto;">
                 <?php
@@ -192,12 +192,12 @@ class WP_Dorna_Admin
                                                 imported++;
                                                 $status.html('وارد شده ' + imported + ' از ' + total + ' کالا ...');
                                             } else {
-                                                $status.append('<br>خطا در وارد کردن کالا با SKU ' + product.sku + ': ' + importResponse.data.message);
+                                                $status.append('<br>خطا در وارد کردن کالا با کد ' + product.sku + ': ' + importResponse.data.message);
                                             }
                                             importNextProduct();
                                         },
                                         error: function() {
-                                            $status.append('<br>خطا در وارد کردن کالا با SKU ' + product.sku);
+                                            $status.append('<br>خطا در وارد کردن کالا با کد ' + product.sku);
                                             importNextProduct();
                                         }
                                     });
