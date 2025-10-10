@@ -9,6 +9,9 @@ class WP_Dorna_Admin
 
         add_action('wp_ajax_wp_dorna_get_products', array($this, 'ajax_get_products'));
         add_action('wp_ajax_wp_dorna_import_product', array($this, 'ajax_import_product'));
+
+        add_action('post_submitbox_misc_actions', array($this, 'add_sync_button'));
+        add_action('wp_ajax_wp_dorna_sync_product', array($this, 'ajax_sync_product'));
     }
 
     public function ajax_get_products()
@@ -23,8 +26,13 @@ class WP_Dorna_Admin
             wp_send_json_error(array('message' => $products->get_error_message()), 400);
         }
 
+        if (!is_array($products) || empty($products['data'])) {
+            $this->log_error('WP Dorna: No products found or invalid response format.');
+            wp_send_json_error(array('message' => 'No products found or invalid response format.'), 404);
+        }
+
         $new_products = array();
-        foreach ($products as $product) {
+        foreach ($products['data'] as $product) {
             if (!isset($product['sku'])) {
                 continue;
             }
@@ -71,7 +79,10 @@ class WP_Dorna_Admin
             wp_send_json_error(array('message' => 'کالا با این کد کالا قبلا وارد شده است.'));
         }
 
-        $product_data['sale_price'] = $product_data['sale_price'] / 10;
+        $currency = get_woocommerce_currency();
+        if ($currency == 'IRT') {
+            $product_data['sale_price'] = $product_data['sale_price'] / 10;
+        }
 
         $new_product = new WC_Product_Simple();
         $new_product->set_status('draft');
@@ -86,6 +97,147 @@ class WP_Dorna_Admin
         $this->log_error('WP Dorna: Product ' . $product_data['name'] . ' imported successfully.');
 
         wp_send_json_success(array('message' => 'کالا ' . $product_data['name'] . ' با موفقیت وارد شد.'));
+    }
+
+    public function add_sync_button()
+    {
+        global $post;
+
+        if ($post->post_type !== 'product') return;
+
+        $product = wc_get_product($post->ID);
+        if (!$product) return;
+
+        $btnLabel = '🔄 بروزرسانی از درنا';
+?>
+        <div class="misc-pub-section">
+            <button
+                type="button"
+                class="button button-secondary"
+                id="wp-dorna-sync-product-btn"
+                data-product-id="<?php echo esc_attr($post->ID); ?>">
+                <?php echo $btnLabel; ?>
+            </button>
+            <span id="wp-dorna-sync-status" style="margin-left:10px; display:none;"></span>
+        </div>
+
+        <script>
+            jQuery(document).ready(function($) {
+                $('#wp-dorna-sync-product-btn').on('click', function() {
+                    var $btn = $(this);
+                    var productId = $btn.data('product-id');
+
+                    $btn.text('در حال بروزرسانی...');
+                    $btn.prop('disabled', true);
+
+                    $.ajax({
+                        url: ajaxurl,
+                        method: 'POST',
+                        data: {
+                            action: 'wp_dorna_sync_product',
+                            product_id: productId,
+                            _ajax_nonce: '<?php echo wp_create_nonce('wp_dorna_sync_product_nonce'); ?>'
+                        },
+                        success: function(response) {
+                            $btn.text('<?php echo $btnLabel; ?>');
+                            $btn.prop('disabled', false);
+                            if (response.success) {
+                                alert('✅ ' + response.data.message);
+                                window.location.reload();
+                            } else {
+                                alert('❌ ' + response.data.message);
+                            }
+                        },
+                        error: function() {
+                            $btn.text('<?php echo $btnLabel; ?>');
+                            $btn.prop('disabled', false);
+                            alert('❌ خطا در ارتباط با درنا');
+                        }
+                    });
+                });
+            });
+        </script>
+    <?php
+    }
+
+    public function ajax_sync_product()
+    {
+        check_ajax_referer('wp_dorna_sync_product_nonce');
+
+        $product_id = intval($_POST['product_id'] ?? 0);
+
+        if (empty($product_id)) {
+            wp_send_json_error(['message' => 'کالا معتبر نیست.']);
+        }
+
+        $product = wc_get_product($product_id);
+        if (!$product) {
+            wp_send_json_error(['message' => 'محصول یافت نشد.']);
+        }
+
+        $currency = get_woocommerce_currency();
+
+        if ($product->is_type('simple')) {
+
+            if (empty($product->get_sku())) {
+                wp_send_json_error(['message' => 'کالا باید کد کالا (SKU) داشته باشد.']);
+            }
+
+            $api = new WP_Dorna_API();
+            $endpoint = $api::PRODUCT_BY_SKU_ENDPOINT . '/' . urlencode($product->get_sku());
+            $response = $api->get_data($endpoint);
+
+            if (is_wp_error($response)) {
+                wp_send_json_error(['message' => $response->get_error_message()]);
+            }
+
+            if (empty($response['sku'])) {
+                wp_send_json_error(['message' => 'کالا در درنا یافت نشد.']);
+            }
+            if ($currency == 'IRT') {
+                $response['sale_price'] = $response['sale_price'] / 10;
+            }
+
+            $price = $response['sale_price'];
+            $stock = $response['stock'];
+            $product->set_price($price);
+            $product->set_regular_price($price);
+            $product->set_manage_stock(true);
+            $product->set_stock_quantity($stock);
+            $product->save();
+        }
+
+        if ($product->is_type('variable')) {
+            $variations = $product->get_children();
+            foreach ($variations as $variation_id) {
+                $variation = wc_get_product($variation_id);
+
+                if (empty($variation->get_sku())) {
+                    wp_send_json_error(['message' => 'تمامی متغیرها باید کد کالا (SKU) داشته باشند.']);
+                }
+
+                $api = new WP_Dorna_API();
+                $endpoint = $api::PRODUCT_BY_SKU_ENDPOINT . '/' . urlencode($variation->get_sku());
+                $response = $api->get_data($endpoint);
+
+                if (!is_array($response) || empty($response['sku'])) continue;
+                
+                if ($currency == 'IRT') {
+                    $response['sale_price'] = $response['sale_price'] / 10;
+                }
+
+                $price = $response['sale_price'];
+                $stock = $response['stock'];
+
+                $variation->set_price($price);
+                $variation->set_regular_price($price);
+                $variation->set_manage_stock(true);
+                $variation->set_stock_quantity($stock);
+                $variation->save();
+            }
+        }
+
+        wp_send_json_success(['message' => 'محصول با موفقیت از درنا بروزرسانی شد.']);
     }
 
     public function register_settings()
@@ -111,7 +263,7 @@ class WP_Dorna_Admin
     public function api_key_callback()
     {
         $options = get_option(WP_DORNA_OPTION_NAME);
-?>
+    ?>
         <input type="text" name="<?php echo WP_DORNA_OPTION_NAME; ?>[api_key]" value="<?php echo isset($options['api_key']) ? esc_attr($options['api_key']) : ''; ?>" style="width: 300px;">
     <?php
     }
@@ -129,6 +281,7 @@ class WP_Dorna_Admin
 
     public function render_settings_page()
     {
+        $lastSync = get_option('wp_dorna_last_product_update', '');
     ?>
         <div class="wrap">
             <h1>تنظیمات اتصال به درنا</h1>
@@ -139,9 +292,13 @@ class WP_Dorna_Admin
                 submit_button();
                 ?>
             </form>
+            <br><br>
+            <h2>تاریخ آخرین بروزرسانی محصولات</h2>
+            <p><?php echo $lastSync ? $lastSync : '-'; ?></p>
+            <br><br>
             <h2>وارد کردن محصولات</h2>
             <button id="wp-dorna-import-products" class="button button-primary">وارد کردن محصولات از درنا</button>
-            <div id="wp-dorna-import-status" style="background: #f1f1f1; border: 1px solid #ccc; padding: 10px; max-height: 300px; overflow: auto; margin-top: 10px;"></div>
+            <div id="wp-dorna-import-status" style="background: #f1f1f1; border: 1px solid #ccc; padding: 10px; max-height: 300px; overflow: auto; margin-top: 10px; display:none"></div>
             <br><br>
             <h2>لاگ خطاهای امروز</h2>
             <pre id="wp-dorna-error-log" dir="ltr" style="background: #f1f1f1; border: 1px solid #ccc; padding: 10px; max-height: 300px; overflow: auto;">
@@ -161,6 +318,8 @@ class WP_Dorna_Admin
                 $('#wp-dorna-import-products').on('click', function() {
                     var $button = $(this);
                     var $status = $('#wp-dorna-import-status');
+
+                    $status.show();
                     $button.attr('disabled', 'disabled');
                     $status.html('در حال دریافت کالاها از درنا ...');
 

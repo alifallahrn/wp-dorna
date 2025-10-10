@@ -28,51 +28,75 @@ class WP_Dorna
 
     public function update_products()
     {
+        global $wpdb;
+
         set_time_limit(0);
+
         $api = new WP_Dorna_API();
-        $products = $api->get_data($api::PRODUCTS_ENDPOINT);
+        $apiEndpoint = $api::PRODUCTS_ENDPOINT;
 
-        if (is_wp_error($products)) {
-            $this->log_error('WP Dorna API Error: ' . $products->get_error_message());
-            wp_send_json_error(array('message' => $products->get_error_message()), 400);
+        $lastSync = get_option('wp_dorna_last_product_update', null);
+        if($lastSync) {
+            $apiEndpoint = $apiEndpoint . '?since=' . urlencode($lastSync);
         }
 
-        if (!is_array($products)) {
-            $this->log_error('WP Dorna API Error: Invalid products data');
-            return;
-        }
+        $page = 1;
+        $dornaProducts = [];
 
-        if (empty($products)) {
-            $this->log_error('WP Dorna API Notice: No products found to update');
-            return;
-        }
+        do {
+            $endpoint = $apiEndpoint . ($lastSync ? '&page=' . $page : '?page=' . $page);
+            $response = $api->get_data($endpoint);
 
-        foreach ($products as $product) {
-            if (!isset($product['sku'])) {
-                continue;
+            if (!is_array($response) || empty($response['data'])) {
+                break;
             }
 
-            $existing_product_id = wc_get_product_id_by_sku($product['sku']);
+            $filteredProducts = array_filter($response['data'], function ($product) {
+                return !empty($product['sku']);
+            });
 
-            $product['sale_price'] = $product['sale_price'] / 10;
+            foreach ($filteredProducts as $p) $dornaProducts[$p['sku']] = $p;
 
-            if (!empty($existing_product_id)) {
-                $wc_product = wc_get_product($existing_product_id);
-                if ($wc_product) {
-                    $wc_product->set_name($product['name']);
-                    $wc_product->set_price($product['sale_price']);
-                    $wc_product->set_regular_price($product['sale_price']);
-                    $wc_product->set_stock_quantity($product['stock']);
-                    $wc_product->save();
+            $hasMore = isset($response['current_page'], $response['last_page']) && $response['current_page'] < $response['last_page'];
+            $page++;
+        } while ($hasMore);
+
+        if (!empty($dornaProducts)) {
+            $wooProductsResults = $wpdb->get_results("SELECT post_id, meta_value as sku FROM {$wpdb->prefix}postmeta WHERE meta_key = '_sku'");
+            $wooProducts = wp_list_pluck($wooProductsResults, 'post_id', 'sku');
+
+            $products = array_intersect_key($dornaProducts, $wooProducts);
+
+            $currency = get_woocommerce_currency();
+
+            foreach ($products as $sku => $product) {
+                $existing_product_id = $wooProducts[$sku] ?? null;
+                if ($existing_product_id) {
+
+                    if ($currency == 'IRT') {
+                        $product['sale_price'] = $product['sale_price'] / 10;
+                    }
+
+                    $wc_product = wc_get_product($existing_product_id);
+                    if ($wc_product) {
+                        $wc_product->set_price($product['sale_price']);
+                        $wc_product->set_regular_price($product['sale_price']);
+                        $wc_product->set_stock_quantity($product['stock']);
+                        $wc_product->save();
+                    }
                 }
             }
         }
+
+        update_option('wp_dorna_last_product_update', current_time('mysql'));
     }
 
     public function create_invoice_in_dorna($order_id)
     {
         $order = wc_get_order($order_id);
         $api = new WP_Dorna_API();
+
+        $currency = get_woocommerce_currency();
 
         $state_code = $order->get_billing_state();
         $country    = $order->get_billing_country();
@@ -91,7 +115,7 @@ class WP_Dorna
                 'address' => $state_name . ' - ' . $city_name . ' - ' . $order->get_billing_address_1(),
             ],
             'items'          => array(),
-            'total'          => ($order->get_total() * 10),
+            'total'          => ($currency == 'IRT') ? ($order->get_total() * 10) : $order->get_total(),
             'order_id'       => $order->get_id(),
             'order_status'   => $order->get_status(),
             'payment_method' => $order->get_payment_method_title(),
@@ -105,11 +129,17 @@ class WP_Dorna
                 continue;
             }
 
+            if ($currency == 'IRT') {
+                $item_total = ($item->get_total() / $item->get_quantity()) * 10;
+            } else {
+                $item_total = ($item->get_total() / $item->get_quantity());
+            }
+
             $invoice_data['items'][] = array(
                 'name'     => $item->get_name(),
                 'sku'      => $product->get_sku(),
                 'quantity' => $item->get_quantity(),
-                'price'    => ($item->get_total() / $item->get_quantity()) * 10,
+                'price'    => $item_total,
             );
         }
 

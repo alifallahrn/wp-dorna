@@ -6,6 +6,7 @@ class WP_Dorna_API
     private $api_key;
 
     const PRODUCTS_ENDPOINT = 'products-list';
+    const PRODUCT_BY_SKU_ENDPOINT = 'product-by-sku';
     const INVOICES_ENDPOINT = 'invoices-create';
 
     public function __construct()
@@ -19,7 +20,9 @@ class WP_Dorna_API
 
         $response = wp_remote_get($url, array(
             'headers' => array(
+                'Accept' => 'application/json',
                 'Authorization' => 'Bearer ' . $this->api_key,
+                'Content-Type'  => 'application/json',
             ),
         ));
 
@@ -46,6 +49,7 @@ class WP_Dorna_API
 
         $response = wp_remote_post($url, array(
             'headers' => array(
+                'Accept' => 'application/json',
                 'Authorization' => 'Bearer ' . $this->api_key,
                 'Content-Type'  => 'application/json',
             ),
