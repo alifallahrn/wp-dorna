@@ -36,7 +36,7 @@ class WP_Dorna
         $apiEndpoint = $api::PRODUCTS_ENDPOINT;
 
         $lastSync = get_option('wp_dorna_last_product_update', null);
-        if($lastSync) {
+        if ($lastSync) {
             $apiEndpoint = $apiEndpoint . '?since=' . urlencode($lastSync);
         }
 
@@ -100,11 +100,11 @@ class WP_Dorna
 
         $state_code = $order->get_billing_state();
         $country    = $order->get_billing_country();
-        $states     = WC()->countries->get_states( $country );
-        $state_name = isset( $states[ $state_code ] ) ? $states[ $state_code ] : $state_code;
+        $states     = WC()->countries->get_states($country);
+        $state_name = isset($states[$state_code]) ? $states[$state_code] : $state_code;
 
         $city_name  = function_exists('pw_get_city_name')
-            ? pw_get_city_name( $state_code, $order->get_billing_city() )
+            ? pw_get_city_name($state_code, $order->get_billing_city())
             : $order->get_billing_city();
 
         $invoice_data = array(
@@ -114,10 +114,11 @@ class WP_Dorna
                 'email' => $order->get_billing_email(),
                 'address' => $state_name . ' - ' . $city_name . ' - ' . $order->get_billing_address_1(),
             ],
-            'items'          => array(),
-            'total'          => ($currency == 'IRT') ? ($order->get_total() * 10) : $order->get_total(),
-            'order_id'       => $order->get_id(),
-            'order_status'   => $order->get_status(),
+            'items' => array(),
+            'discount' => ($currency == 'IRT') ? ($order->get_total_discount() * 10) : $order->get_total_discount(),
+            'total' => ($currency == 'IRT') ? ($order->get_total() * 10) : $order->get_total(),
+            'order_id' => $order->get_id(),
+            'order_status' => $order->get_status(),
             'payment_method' => $order->get_payment_method_title(),
             'transaction_id' => $order->get_transaction_id(),
         );

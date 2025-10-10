@@ -4,7 +4,7 @@ use YahnisElsts\PluginUpdateChecker\v5\PucFactory;
 Plugin Name: WP Dorna
 Plugin URI: https://github.com/alifallahrn/wp-dorna
 Description: افزونه اتصال ووکامرس به پلتفرم درنا
-Version: 1.1.1
+Version: 1.1.2
 Author: Ali Fallah
 Author URI: https://dornaapp.ir
 License: GPL2
@@ -18,7 +18,7 @@ if (! defined('WPINC')) {
 
 require 'vendor/autoload.php';
 
-define('WP_DORNA_VERSION', '1.1.1');
+define('WP_DORNA_VERSION', '1.1.2');
 define('WP_DORNA_PLUGIN_DIR', plugin_dir_path(__FILE__));
 define('WP_DORNA_PLUGIN_URL', plugin_dir_url(__FILE__));
 define('WP_DORNA_API_URL', 'https://my.dornaapp.ir/api/v1/');
