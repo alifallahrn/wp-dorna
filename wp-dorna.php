@@ -1,20 +1,24 @@
 <?php
+use YahnisElsts\PluginUpdateChecker\v5\PucFactory;
 /*
 Plugin Name: WP Dorna
 Plugin URI: https://github.com/alifallahrn/wp-dorna
 Description: افزونه اتصال ووکامرس به پلتفرم درنا
-Version: 1.1.0
+Version: 1.1.1
 Author: Ali Fallah
 Author URI: https://dornaapp.ir
 License: GPL2
 */
 
 // If this file is called directly, abort.
+
 if (! defined('WPINC')) {
     die;
 }
 
-define('WP_DORNA_VERSION', '1.1.0');
+require 'vendor/autoload.php';
+
+define('WP_DORNA_VERSION', '1.1.1');
 define('WP_DORNA_PLUGIN_DIR', plugin_dir_path(__FILE__));
 define('WP_DORNA_PLUGIN_URL', plugin_dir_url(__FILE__));
 define('WP_DORNA_API_URL', 'https://my.dornaapp.ir/api/v1/');
@@ -54,3 +58,6 @@ function wp_dorna_init()
     }
 }
 add_action('plugins_loaded', 'wp_dorna_init');
+
+$updateChecker = PucFactory::buildUpdateChecker('https://github.com/alifallahrn/wp-dorna', __FILE__, 'wp-dorna');
+$updateChecker->getVcsApi()->enableReleaseAssets();
