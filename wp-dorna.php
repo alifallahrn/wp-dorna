@@ -3,7 +3,7 @@ use YahnisElsts\PluginUpdateChecker\v5\PucFactory;
 /*
 Plugin Name: WP Dorna
 Plugin URI: https://github.com/alifallahrn/wp-dorna
-Description: افزونه اتصال ووکامرس به پلتفرم درنا
+Description: A WooCommerce integration plugin for the Dorna platform. It allows you to sync your WooCommerce products with the Dorna platform effortlessly.
 Version: 1.1.2
 Author: Ali Fallah
 Author URI: https://dornaapp.ir
