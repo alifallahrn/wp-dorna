@@ -221,7 +221,7 @@ class WP_Dorna_Admin
                 $response = $api->get_data($endpoint);
 
                 if (!is_array($response) || empty($response['sku'])) continue;
-                
+
                 if ($currency == 'IRT') {
                     $response['sale_price'] = $response['sale_price'] / 10;
                 }
@@ -282,35 +282,241 @@ class WP_Dorna_Admin
     public function render_settings_page()
     {
         $lastSync = get_option('wp_dorna_last_product_update', '');
+        $log_file = WP_DORNA_PLUGIN_DIR . 'logs/' . date('Y-m-d') . '.log';
     ?>
-        <div class="wrap">
-            <h1>تنظیمات اتصال به درنا</h1>
-            <form method="post" action="options.php">
-                <?php
-                settings_fields('wp_dorna_settings_group');
-                do_settings_sections('wp-dorna-settings');
-                submit_button();
-                ?>
-            </form>
-            <br><br>
-            <h2>تاریخ آخرین بروزرسانی محصولات</h2>
-            <p><?php echo $lastSync ? $lastSync : '-'; ?></p>
-            <br><br>
-            <h2>وارد کردن محصولات</h2>
-            <button id="wp-dorna-import-products" class="button button-primary">وارد کردن محصولات از درنا</button>
-            <div id="wp-dorna-import-status" style="background: #f1f1f1; border: 1px solid #ccc; padding: 10px; max-height: 300px; overflow: auto; margin-top: 10px; display:none"></div>
-            <br><br>
-            <h2>لاگ خطاهای امروز</h2>
-            <pre id="wp-dorna-error-log" dir="ltr" style="background: #f1f1f1; border: 1px solid #ccc; padding: 10px; max-height: 300px; overflow: auto;">
-                <?php
-                $log_file = WP_DORNA_PLUGIN_DIR . 'logs/' . date('Y-m-d') . '.log';
-                if (file_exists($log_file)) {
-                    echo esc_html(file_get_contents($log_file));
-                } else {
-                    echo 'لاگ خطایی وجود ندارد.';
+
+        <div class="wrap wp-dorna-settings">
+            <style>
+                @import url('https://cdn.jsdelivr.net/gh/rastikerdar/vazir-font@v30.1.0/dist/font-face.css');
+
+                .wp-dorna-settings {
+                    font-family: Vazir, Tahoma, sans-serif !important;
+                    background: #F9FAFB;
+                    border-radius: 12px;
+                    overflow: hidden;
+                    box-shadow: 0 2px 10px rgba(0, 0, 0, 0.05);
+                    margin-top: 20px;
+                    color: #1E293B;
                 }
-                ?>
-            </pre>
+
+                /* Typography */
+                .wp-dorna-settings h1,
+                .wp-dorna-settings h2,
+                .wp-dorna-settings h3,
+                .wp-dorna-settings h4,
+                .wp-dorna-settings h5,
+                .wp-dorna-settings h6 {
+                    font-family: Vazir, Tahoma, sans-serif !important;
+                    color: #1E293B;
+                }
+
+                /* Header */
+                .wp-dorna-header {
+                    background: #FFFFFF;
+                    border-bottom: 1px solid #E5E7EB;
+                    color: #1E293B;
+                    padding: 25px 30px;
+                    text-align: right;
+                }
+
+                .wp-dorna-header h1 {
+                    margin: 0;
+                    font-size: 22px;
+                    font-weight: 600;
+                }
+
+                .wp-dorna-header p {
+                    margin-top: 5px;
+                    font-size: 14px;
+                    color: #64748B;
+                }
+
+                /* Layout */
+                .wp-dorna-body {
+                    display: flex;
+                    background: #F9FAFB;
+                }
+
+                /* Sidebar */
+                .wp-dorna-sidebar {
+                    width: 230px;
+                    border-left: 1px solid #E5E7EB;
+                    background: #FFFFFF;
+                    padding: 15px 0;
+                }
+
+                .wp-dorna-tab {
+                    display: block;
+                    padding: 12px 20px;
+                    color: #334155;
+                    cursor: pointer;
+                    border-right: 4px solid transparent;
+                    transition: all 0.2s ease;
+                    font-weight: 500;
+                    border-radius: 6px 0 0 6px;
+                    margin: 4px 10px;
+                }
+
+                .wp-dorna-tab:hover {
+                    background: #F1F5F9;
+                }
+
+                .wp-dorna-tab.active {
+                    background: #EEF2FF;
+                    border-color: #2563EB;
+                    color: #2563EB;
+                }
+
+                /* Content */
+                .wp-dorna-content {
+                    flex: 1;
+                    padding: 30px 40px;
+                    background: #FFFFFF;
+                    border-radius: 0 0 12px 0;
+                }
+
+                .wp-dorna-content h2 {
+                    font-size: 18px;
+                    border-bottom: 1px solid #E5E7EB;
+                    padding-bottom: 8px;
+                    margin-bottom: 20px;
+                    color: #2563EB;
+                }
+
+                /* Boxes */
+                .wp-dorna-box {
+                    background: #FFFFFF;
+                    border: 1px solid #E5E7EB;
+                    border-radius: 10px;
+                    padding: 18px 20px;
+                    margin-bottom: 25px;
+                    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.03);
+                }
+
+                /* Form elements */
+                input[type="text"],
+                input[type="password"],
+                input[type="url"],
+                select {
+                    width: 100%;
+                    padding: 10px 12px;
+                    border: 1px solid #D1D5DB;
+                    border-radius: 8px;
+                    font-size: 14px;
+                    font-family: Vazir;
+                    margin-top: 5px;
+                    background: #F9FAFB;
+                    color: #1E293B;
+                }
+
+                input[type="text"]:focus,
+                select:focus {
+                    border-color: #2563EB;
+                    outline: none;
+                    box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.15);
+                }
+
+                /* Buttons */
+                .button-primary {
+                    background: #2563EB !important;
+                    border: none !important;
+                    border-radius: 8px !important;
+                    padding: 9px 22px !important;
+                    font-family: Vazir;
+                    font-size: 14px;
+                    transition: background 0.3s;
+                }
+
+                .button-primary:hover {
+                    background: #1D4ED8 !important;
+                }
+
+                pre {
+                    direction: ltr;
+                    background: #F9FAFB;
+                    padding: 12px;
+                    border-radius: 8px;
+                    border: 1px solid #E5E7EB;
+                    font-size: 13px;
+                    max-height: 300px;
+                    overflow-y: auto;
+                    color: #334155;
+                }
+            </style>
+
+            <!-- Header -->
+            <div class="wp-dorna-header">
+                <h1>درنا - اتصال به ووکامرس</h1>
+                <p>مدیریت اتصال و هماهنگ‌سازی بین سیستم درنا و فروشگاه شما</p>
+            </div>
+
+            <!-- Body -->
+            <div class="wp-dorna-body">
+                <!-- Sidebar -->
+                <div class="wp-dorna-sidebar">
+                    <div class="wp-dorna-tab active" data-tab="settings">تنظیمات</div>
+                    <div class="wp-dorna-tab" data-tab="import">وارد کردن محصولات</div>
+                    <div class="wp-dorna-tab" data-tab="logs">لاگ خطاها</div>
+                </div>
+
+                <!-- Content -->
+                <div class="wp-dorna-content">
+                    <!-- Settings -->
+                    <div id="tab-settings" class="wp-dorna-tab-content active">
+                        <form method="post" action="options.php">
+                            <?php
+                            settings_fields('wp_dorna_settings_group');
+                            do_settings_sections('wp-dorna-settings');
+                            submit_button('ذخیره تنظیمات');
+                            ?>
+                        </form>
+
+                        <div class="wp-dorna-box">
+                            <h3>آخرین بروزرسانی محصولات</h3>
+                            <p><?php echo $lastSync ? esc_html($lastSync) : '-'; ?></p>
+                        </div>
+                    </div>
+
+                    <!-- Import -->
+                    <div id="tab-import" class="wp-dorna-tab-content" style="display:none;">
+                        <h2>وارد کردن محصولات</h2>
+                        <p>با کلیک بر روی دکمه زیر، محصولات شما از درنا به ووکامرس منتقل خواهند شد.</p>
+                        <button id="wp-dorna-import-products" class="button button-primary">شروع وارد کردن</button>
+
+                        <div id="wp-dorna-import-status" class="wp-dorna-box" style="display:none; margin-top:15px;"></div>
+                    </div>
+
+                    <!-- Logs -->
+                    <div id="tab-logs" class="wp-dorna-tab-content" style="display:none;">
+                        <h2>لاگ خطاهای امروز</h2>
+                        <div class="wp-dorna-box">
+                            <?php if (file_exists($log_file)) { ?>
+                                <pre id="wp-dorna-error-log">
+                                    <?php echo esc_html(file_get_contents($log_file)); ?>
+                                </pre>
+                            <?php } else { ?>
+                                <p>هیچ خطایی ثبت نشده است.</p>
+                            <?php } ?>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <script>
+                document.addEventListener("DOMContentLoaded", function() {
+                    const tabs = document.querySelectorAll(".wp-dorna-tab");
+                    const contents = document.querySelectorAll(".wp-dorna-tab-content");
+
+                    tabs.forEach(tab => {
+                        tab.addEventListener("click", () => {
+                            tabs.forEach(t => t.classList.remove("active"));
+                            contents.forEach(c => c.style.display = "none");
+                            tab.classList.add("active");
+                            document.getElementById("tab-" + tab.dataset.tab).style.display = "block";
+                        });
+                    });
+                });
+            </script>
         </div>
 
         <script>

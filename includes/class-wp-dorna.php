@@ -119,6 +119,7 @@ class WP_Dorna
             'total' => ($currency == 'IRT') ? ($order->get_total() * 10) : $order->get_total(),
             'order_id' => $order->get_id(),
             'order_status' => $order->get_status(),
+            'order_note' => $order->get_customer_note(),
             'payment_method' => $order->get_payment_method_title(),
             'transaction_id' => $order->get_transaction_id(),
         );
