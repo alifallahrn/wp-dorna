@@ -73,14 +73,9 @@ class WP_Dorna
                 $existing_product_id = $wooProducts[$sku] ?? null;
                 if ($existing_product_id) {
 
-                    if ($currency == 'IRT') {
-                        $product['sale_price'] = $product['sale_price'] / 10;
-                    }
-
                     $wc_product = wc_get_product($existing_product_id);
                     if ($wc_product) {
-                        $wc_product->set_price($product['sale_price']);
-                        $wc_product->set_regular_price($product['sale_price']);
+                        $this->apply_dorna_pricing($wc_product, $product, $currency);
                         $wc_product->set_stock_quantity($product['stock']);
                         $wc_product->save();
                     }
@@ -94,6 +89,10 @@ class WP_Dorna
     public function create_invoice_in_dorna($order_id)
     {
         $order = wc_get_order($order_id);
+
+        if (!$order || $order->get_meta('_dorna_invoice_sent')) {
+            return;
+        }
         $api = new WP_Dorna_API();
 
         $currency = get_woocommerce_currency();
@@ -110,12 +109,20 @@ class WP_Dorna
         $invoice_data = array(
             'customer' => [
                 'name' => $order->get_billing_first_name() . ' ' . $order->get_billing_last_name(),
-                'mobile' => $order->get_billing_phone(),
+                'mobile' => $order->get_billing_phone() ?: null,
                 'email' => $order->get_billing_email(),
-                'address' => $state_name . ' - ' . $city_name . ' - ' . $order->get_billing_address_1(),
+                'address' => implode(' - ', array_filter([
+                    $state_name,
+                    $city_name,
+                    $order->get_billing_address_1(),
+                    $order->get_billing_postcode() ?: null,
+                ])),
             ],
             'items' => array(),
             'discount' => ($currency == 'IRT') ? ($order->get_total_discount() * 10) : $order->get_total_discount(),
+            'shipping_cost' => ($currency == 'IRT') ? ($order->get_shipping_total() * 10) : $order->get_shipping_total(),
+            'tax' => ($currency == 'IRT') ? ($order->get_total_tax() * 10) : (float) $order->get_total_tax(),
+            'sub_total' => ($currency == 'IRT') ? ($order->get_subtotal() * 10) : $order->get_subtotal(),
             'total' => ($currency == 'IRT') ? ($order->get_total() * 10) : $order->get_total(),
             'order_id' => $order->get_id(),
             'order_status' => $order->get_status(),
@@ -148,8 +155,49 @@ class WP_Dorna
         $response = $api->post_data($api::INVOICES_ENDPOINT, $invoice_data);
 
         if (is_wp_error($response)) {
-            $this->log_error('WP Dorna API Error: ' . $response->get_error_message());
+            $this->log_error(sprintf(
+                'WP Dorna invoice send FAILED (order #%d): %s | Payload: %s',
+                $order_id,
+                $response->get_error_message(),
+                json_encode($invoice_data)
+            ));
             return;
+        }
+
+        $order->update_meta_data('_dorna_invoice_sent', true);
+        $order->update_meta_data('_dorna_invoice_id', $response['invoice_id'] ?? '');
+        $order->save();
+    }
+
+    private function apply_dorna_pricing($wc_product, $product, $currency)
+    {
+        $original   = $product['original_price'] ?? $product['sale_price'];
+        $discounted = $product['discounted_price'] ?? null;
+        $active     = !empty($product['discount_active']);
+
+        if ($currency === 'IRT') {
+            $original = $original / 10;
+            if ($discounted !== null) {
+                $discounted = $discounted / 10;
+            }
+        }
+
+        $wc_product->set_regular_price($original);
+
+        if ($active && $discounted !== null) {
+            $wc_product->set_sale_price($discounted);
+            $wc_product->set_price($discounted);
+            if (!empty($product['discount_start_date'])) {
+                $wc_product->set_date_on_sale_from(strtotime($product['discount_start_date']));
+            }
+            if (!empty($product['discount_end_date'])) {
+                $wc_product->set_date_on_sale_to(strtotime($product['discount_end_date']));
+            }
+        } else {
+            $wc_product->set_sale_price('');
+            $wc_product->set_price($original);
+            $wc_product->set_date_on_sale_from('');
+            $wc_product->set_date_on_sale_to('');
         }
     }
 

@@ -12,6 +12,9 @@ class WP_Dorna_Admin
 
         add_action('post_submitbox_misc_actions', array($this, 'add_sync_button'));
         add_action('wp_ajax_wp_dorna_sync_product', array($this, 'ajax_sync_product'));
+
+        add_action('add_meta_boxes', array($this, 'add_order_dorna_meta_box'));
+        add_action('wp_ajax_wp_dorna_send_order', array($this, 'ajax_send_order'));
     }
 
     public function ajax_get_products()
@@ -80,16 +83,12 @@ class WP_Dorna_Admin
         }
 
         $currency = get_woocommerce_currency();
-        if ($currency == 'IRT') {
-            $product_data['sale_price'] = $product_data['sale_price'] / 10;
-        }
 
         $new_product = new WC_Product_Simple();
         $new_product->set_status('draft');
         $new_product->set_name($product_data['name']);
         $new_product->set_sku($product_data['sku']);
-        $new_product->set_price($product_data['sale_price']);
-        $new_product->set_regular_price($product_data['sale_price']);
+        $this->apply_dorna_pricing($new_product, $product_data, $currency);
         $new_product->set_manage_stock(true);
         $new_product->set_stock_quantity($product_data['stock']);
         $new_product->save();
@@ -194,16 +193,9 @@ class WP_Dorna_Admin
             if (empty($response['sku'])) {
                 wp_send_json_error(['message' => 'کالا در درنا یافت نشد.']);
             }
-            if ($currency == 'IRT') {
-                $response['sale_price'] = $response['sale_price'] / 10;
-            }
-
-            $price = $response['sale_price'];
-            $stock = $response['stock'];
-            $product->set_price($price);
-            $product->set_regular_price($price);
+            $this->apply_dorna_pricing($product, $response, $currency);
             $product->set_manage_stock(true);
-            $product->set_stock_quantity($stock);
+            $product->set_stock_quantity($response['stock']);
             $product->save();
         }
 
@@ -222,17 +214,9 @@ class WP_Dorna_Admin
 
                 if (!is_array($response) || empty($response['sku'])) continue;
 
-                if ($currency == 'IRT') {
-                    $response['sale_price'] = $response['sale_price'] / 10;
-                }
-
-                $price = $response['sale_price'];
-                $stock = $response['stock'];
-
-                $variation->set_price($price);
-                $variation->set_regular_price($price);
+                $this->apply_dorna_pricing($variation, $response, $currency);
                 $variation->set_manage_stock(true);
-                $variation->set_stock_quantity($stock);
+                $variation->set_stock_quantity($response['stock']);
                 $variation->save();
             }
         }
@@ -607,6 +591,154 @@ class WP_Dorna_Admin
             });
         </script>
 <?php
+    }
+
+    public function add_order_dorna_meta_box()
+    {
+        $screen = function_exists('wc_get_page_screen_id')
+            ? wc_get_page_screen_id('shop-order')
+            : 'shop_order';
+
+        add_meta_box(
+            'wp-dorna-order-box',
+            'اتصال به درنا',
+            array($this, 'render_order_dorna_meta_box'),
+            $screen,
+            'side',
+            'high'
+        );
+    }
+
+    public function render_order_dorna_meta_box($post_or_order)
+    {
+        $order = ($post_or_order instanceof WC_Abstract_Order)
+            ? $post_or_order
+            : wc_get_order($post_or_order->ID);
+
+        if (!$order) return;
+
+        $order_id   = $order->get_id();
+        $is_sent    = $order->get_meta('_dorna_invoice_sent');
+        $invoice_id = $order->get_meta('_dorna_invoice_id');
+        $nonce      = wp_create_nonce('wp_dorna_send_order_nonce');
+?>
+        <div style="padding: 4px 0;">
+            <?php if ($is_sent) : ?>
+                <p style="margin:0; color:#2563EB; font-weight:600;">
+                    ✅ فاکتور در درنا ثبت شد
+                    <?php if ($invoice_id) : ?>
+                        <br><small style="font-weight:400; color:#64748B;">شناسه: <?php echo esc_html($invoice_id); ?></small>
+                    <?php endif; ?>
+                </p>
+            <?php else : ?>
+                <button
+                    type="button"
+                    class="button button-secondary"
+                    id="wp-dorna-send-order-btn"
+                    data-order-id="<?php echo esc_attr($order_id); ?>"
+                    data-nonce="<?php echo esc_attr($nonce); ?>"
+                    style="width:100%;">
+                    📤 ارسال به درنا
+                </button>
+                <p id="wp-dorna-send-order-status" style="margin: 6px 0 0; display:none;"></p>
+            <?php endif; ?>
+        </div>
+
+        <script>
+            jQuery(document).ready(function($) {
+                $('#wp-dorna-send-order-btn').on('click', function() {
+                    var $btn    = $(this);
+                    var $status = $('#wp-dorna-send-order-status');
+                    $btn.text('در حال ارسال...').prop('disabled', true);
+                    $status.hide();
+
+                    $.ajax({
+                        url: ajaxurl,
+                        method: 'POST',
+                        data: {
+                            action: 'wp_dorna_send_order',
+                            order_id: $btn.data('order-id'),
+                            _ajax_nonce: $btn.data('nonce')
+                        },
+                        success: function(response) {
+                            if (response.success) {
+                                alert('✅ ' + response.data.message);
+                                window.location.reload();
+                            } else {
+                                $btn.text('📤 ارسال به درنا').prop('disabled', false);
+                                $status.html('❌ ' + response.data.message).show();
+                            }
+                        },
+                        error: function() {
+                            $btn.text('📤 ارسال به درنا').prop('disabled', false);
+                            $status.html('❌ خطا در ارتباط با درنا').show();
+                        }
+                    });
+                });
+            });
+        </script>
+<?php
+    }
+
+    public function ajax_send_order()
+    {
+        check_ajax_referer('wp_dorna_send_order_nonce');
+
+        $order_id = intval($_POST['order_id'] ?? 0);
+
+        if (empty($order_id)) {
+            wp_send_json_error(['message' => 'سفارش معتبر نیست.']);
+        }
+
+        $order = wc_get_order($order_id);
+        if (!$order) {
+            wp_send_json_error(['message' => 'سفارش یافت نشد.']);
+        }
+
+        if ($order->get_meta('_dorna_invoice_sent')) {
+            wp_send_json_error(['message' => 'این سفارش قبلاً به درنا ارسال شده است.']);
+        }
+
+        $wp_dorna = new WP_Dorna();
+        $wp_dorna->create_invoice_in_dorna($order_id);
+
+        if (wc_get_order($order_id)->get_meta('_dorna_invoice_sent')) {
+            wp_send_json_success(['message' => 'سفارش با موفقیت به درنا ارسال شد.']);
+        } else {
+            wp_send_json_error(['message' => 'ارسال به درنا ناموفق بود. لاگ‌های امروز را بررسی کنید.']);
+        }
+    }
+
+    private function apply_dorna_pricing($wc_product, $product, $currency)
+    {
+        $original   = $product['original_price'] ?? $product['sale_price'];
+        $discounted = $product['discounted_price'] ?? null;
+        $active     = !empty($product['discount_active']);
+
+        if ($currency === 'IRT') {
+            $original = $original / 10;
+            if ($discounted !== null) {
+                $discounted = $discounted / 10;
+            }
+        }
+
+        $wc_product->set_regular_price($original);
+
+        if ($active && $discounted !== null) {
+            $wc_product->set_sale_price($discounted);
+            $wc_product->set_price($discounted);
+            if (!empty($product['discount_start_date'])) {
+                $wc_product->set_date_on_sale_from(strtotime($product['discount_start_date']));
+            }
+            if (!empty($product['discount_end_date'])) {
+                $wc_product->set_date_on_sale_to(strtotime($product['discount_end_date']));
+            }
+        } else {
+            $wc_product->set_sale_price('');
+            $wc_product->set_price($original);
+            $wc_product->set_date_on_sale_from('');
+            $wc_product->set_date_on_sale_to('');
+        }
     }
 
     // save error logs to files day to day in plugin folder
