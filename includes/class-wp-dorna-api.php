@@ -60,6 +60,14 @@ class WP_Dorna_API
             return new WP_Error('api_error', $response->get_error_message());
         }
 
-        return json_decode($response['body'], true);
+        $status_code = wp_remote_retrieve_response_code($response);
+        $body        = json_decode(wp_remote_retrieve_body($response), true);
+
+        if ($status_code < 200 || $status_code >= 300) {
+            $message = $body['message'] ?? $body['error'] ?? 'HTTP ' . $status_code;
+            return new WP_Error('api_error', $message, ['status' => $status_code, 'body' => $body]);
+        }
+
+        return $body;
     }
 }

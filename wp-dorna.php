@@ -4,7 +4,7 @@ use YahnisElsts\PluginUpdateChecker\v5\PucFactory;
 Plugin Name: WP Dorna
 Plugin URI: https://github.com/alifallahrn/wp-dorna
 Description: A WooCommerce integration plugin for the Dorna platform. It allows you to sync your WooCommerce products with the Dorna platform effortlessly.
-Version: 1.2.1
+Version: 1.3.0
 Author: Ali Fallah
 Author URI: https://dornaapp.ir
 License: GPL2
@@ -18,7 +18,7 @@ if (! defined('WPINC')) {
 
 require 'vendor/autoload.php';
 
-define('WP_DORNA_VERSION', '1.2.1');
+define('WP_DORNA_VERSION', '1.3.0');
 define('WP_DORNA_PLUGIN_DIR', plugin_dir_path(__FILE__));
 define('WP_DORNA_PLUGIN_URL', plugin_dir_url(__FILE__));
 define('WP_DORNA_API_URL', 'https://my.dornaapp.ir/api/v1/');
@@ -58,6 +58,12 @@ function wp_dorna_init()
     }
 }
 add_action('plugins_loaded', 'wp_dorna_init');
+
+add_action('before_woocommerce_init', function () {
+    if (class_exists(\Automattic\WooCommerce\Utilities\FeaturesUtil::class)) {
+        \Automattic\WooCommerce\Utilities\FeaturesUtil::declare_compatibility('custom_order_tables', __FILE__, true);
+    }
+});
 
 $updateChecker = PucFactory::buildUpdateChecker('https://github.com/alifallahrn/wp-dorna', __FILE__, 'wp-dorna');
 $updateChecker->getVcsApi()->enableReleaseAssets();
