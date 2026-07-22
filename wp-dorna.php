@@ -4,7 +4,7 @@ use YahnisElsts\PluginUpdateChecker\v5\PucFactory;
 Plugin Name: WP Dorna
 Plugin URI: https://github.com/alifallahrn/wp-dorna
 Description: A WooCommerce integration plugin for the Dorna platform. It allows you to sync your WooCommerce products with the Dorna platform effortlessly.
-Version: 1.3.0
+Version: 1.4.0
 Author: Ali Fallah
 Author URI: https://dornaapp.ir
 License: GPL2
@@ -18,7 +18,7 @@ if (! defined('WPINC')) {
 
 require 'vendor/autoload.php';
 
-define('WP_DORNA_VERSION', '1.3.0');
+define('WP_DORNA_VERSION', '1.4.0');
 define('WP_DORNA_PLUGIN_DIR', plugin_dir_path(__FILE__));
 define('WP_DORNA_PLUGIN_URL', plugin_dir_url(__FILE__));
 define('WP_DORNA_API_URL', 'https://my.dornaapp.ir/api/v1/');
@@ -40,9 +40,14 @@ register_activation_hook(__FILE__, 'wp_dorna_activate');
 
 function wp_dorna_deactivate()
 {
-    $timestamp = wp_next_scheduled('wp_dorna_update_products_event');
-    if ($timestamp) {
-        wp_unschedule_event($timestamp, 'wp_dorna_update_products_event');
+    $product_timestamp = wp_next_scheduled('wp_dorna_update_products_event');
+    if ($product_timestamp) {
+        wp_unschedule_event($product_timestamp, 'wp_dorna_update_products_event');
+    }
+
+    $retry_timestamp = wp_next_scheduled('wp_dorna_retry_failed_orders_event');
+    if ($retry_timestamp) {
+        wp_unschedule_event($retry_timestamp, 'wp_dorna_retry_failed_orders_event');
     }
 }
 register_deactivation_hook(__FILE__, 'wp_dorna_deactivate');
