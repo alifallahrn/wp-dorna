@@ -15,6 +15,12 @@ class WP_Dorna_Admin
 
         add_action('add_meta_boxes', array($this, 'add_order_dorna_meta_box'));
         add_action('wp_ajax_wp_dorna_send_order', array($this, 'ajax_send_order'));
+
+        add_filter('manage_woocommerce_page_wc-orders_columns', array($this, 'add_dorna_order_column'));
+        add_action('manage_woocommerce_page_wc-orders_custom_column', array($this, 'render_dorna_order_column'), 10, 2);
+
+        add_filter('manage_edit-shop_order_columns', array($this, 'add_dorna_order_column'));
+        add_action('manage_shop_order_posts_custom_column', array($this, 'render_dorna_order_column_legacy'));
     }
 
     public function ajax_get_products()
@@ -222,6 +228,58 @@ class WP_Dorna_Admin
         }
 
         wp_send_json_success(['message' => 'محصول با موفقیت از درنا بروزرسانی شد.']);
+    }
+
+    public function add_dorna_order_column($columns)
+    {
+        $columns['dorna_status'] = 'ارسال به درنا';
+        return $columns;
+    }
+
+    public function render_dorna_order_column($column, $order)
+    {
+        if ($column !== 'dorna_status') {
+            return;
+        }
+
+        $is_sent    = $order->get_meta('_dorna_invoice_sent');
+        $invoice_id = $order->get_meta('_dorna_invoice_id');
+
+        if ($is_sent) {
+            echo '✅';
+            if ($invoice_id) {
+                echo '<br><small style="color:#64748B;">' . esc_html($invoice_id) . '</small>';
+            }
+        } else {
+            echo '❌';
+        }
+    }
+
+    public function render_dorna_order_column_legacy($column)
+    {
+        global $post;
+
+        if ($column !== 'dorna_status') {
+            return;
+        }
+
+        $order = wc_get_order($post->ID);
+        if (!$order) {
+            echo '❌';
+            return;
+        }
+
+        $is_sent    = $order->get_meta('_dorna_invoice_sent');
+        $invoice_id = $order->get_meta('_dorna_invoice_id');
+
+        if ($is_sent) {
+            echo '✅';
+            if ($invoice_id) {
+                echo '<br><small style="color:#64748B;">' . esc_html($invoice_id) . '</small>';
+            }
+        } else {
+            echo '❌';
+        }
     }
 
     public function register_settings()

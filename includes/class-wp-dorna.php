@@ -9,12 +9,18 @@ class WP_Dorna
                 'interval' => 60,
                 'display'  => __('Every Minute'),
             );
+            $schedules['every_five_minutes'] = array(
+                'interval' => 300,
+                'display'  => __('Every 5 Minutes'),
+            );
             return $schedules;
         });
 
         $this->schedule_product_updates();
+        $this->schedule_retry_cron();
 
         add_action('wp_dorna_update_products_event', array($this, 'update_products'));
+        add_action('wp_dorna_retry_failed_orders_event', array($this, 'retry_failed_orders'));
         add_action('woocommerce_order_status_processing', array($this, 'create_invoice_in_dorna'));
         add_action('woocommerce_order_status_completed', array($this, 'create_invoice_in_dorna'));
     }
@@ -23,6 +29,13 @@ class WP_Dorna
     {
         if (!wp_next_scheduled('wp_dorna_update_products_event')) {
             wp_schedule_event(time(), 'every_minute', 'wp_dorna_update_products_event');
+        }
+    }
+
+    public function schedule_retry_cron()
+    {
+        if (!wp_next_scheduled('wp_dorna_retry_failed_orders_event')) {
+            wp_schedule_event(time(), 'every_five_minutes', 'wp_dorna_retry_failed_orders_event');
         }
     }
 
@@ -84,6 +97,21 @@ class WP_Dorna
         }
 
         update_option('wp_dorna_last_product_update', current_time('mysql'));
+    }
+
+    public function retry_failed_orders()
+    {
+        $orders = wc_get_orders(array(
+            'status'       => array('processing', 'completed'),
+            'limit'        => -1,
+            'date_created' => '>' . (time() - 24 * HOUR_IN_SECONDS),
+            'meta_key'     => '_dorna_invoice_sent',
+            'meta_compare' => 'NOT EXISTS',
+        ));
+
+        foreach ($orders as $order) {
+            $this->create_invoice_in_dorna($order->get_id());
+        }
     }
 
     public function create_invoice_in_dorna($order_id)
