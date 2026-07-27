@@ -85,10 +85,10 @@ class WP_Dorna
             foreach ($products as $sku => $product) {
                 $existing_product_id = $wooProducts[$sku] ?? null;
                 if ($existing_product_id) {
-
                     $wc_product = wc_get_product($existing_product_id);
                     if ($wc_product) {
                         $this->apply_dorna_pricing($wc_product, $product, $currency);
+                        $wc_product->set_manage_stock(true);
                         $wc_product->set_stock_quantity($product['stock']);
                         $wc_product->save();
                     }
