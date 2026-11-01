@@ -1,5 +1,16 @@
 <?php
 
+namespace WPDorna\Sync;
+
+use Throwable;
+use WP_Error;
+use WPDorna\Api\Client;
+use WPDorna\Support\Backoff;
+use WPDorna\Support\Lock;
+use WPDorna\Support\Logger;
+use WPDorna\Support\Sku;
+use WPDorna\Support\Time;
+
 /**
  * One slow pass over every product Dorna has, applying price and stock to the
  * matching WooCommerce products. Meant to heal any drift the incremental sync
@@ -11,7 +22,7 @@
  *   server restart. WP-Cron drives it in the background, and the open admin
  *   page speeds it up (the lock keeps the two from overlapping).
  */
-class WP_Dorna_Full_Sync
+class FullSync
 {
     const STATE_OPTION  = 'wp_dorna_full_sync';
     const SEEN_OPTION   = 'wp_dorna_full_sync_seen';
@@ -19,25 +30,29 @@ class WP_Dorna_Full_Sync
     const CRON_HOOK     = 'wp_dorna_full_sync_tick';
     const LOCK          = 'full_sync';
 
-    const DEFAULT_DELAY         = 3;
-    const CRON_BUDGET           = 40;
-    const CRON_PAGES            = 12;
+    const DEFAULT_DELAY          = 3;
+    const CRON_BUDGET            = 40;
+    const CRON_PAGES             = 12;
     const MAX_CONSECUTIVE_ERRORS = 5;
-    const MAX_PAGES             = 2000;
-    const REPORT_LIMIT          = 500;
+    const MAX_PAGES              = 2000;
+    const REPORT_LIMIT           = 500;
 
-    private $core;
+    private $client;
+    private $writer;
+    private $lock;
+    private $logger;
 
-    public function __construct()
+    public function __construct(Client $client, ProductWriter $writer, Lock $lock, Logger $logger)
     {
-        $this->core = new WP_Dorna();
+        $this->client = $client;
+        $this->writer = $writer;
+        $this->lock   = $lock;
+        $this->logger = $logger;
     }
 
-    public function init()
+    public function register()
     {
         add_action(self::CRON_HOOK, array($this, 'cron_tick'));
-        add_action('wp_ajax_wp_dorna_full_sync', array($this, 'ajax'));
-        add_action('admin_enqueue_scripts', array($this, 'enqueue_assets'));
 
         // Survives deactivate / reactivate while a run is in progress.
         if (self::is_running()) {
@@ -104,22 +119,25 @@ class WP_Dorna_Full_Sync
 
     // ---------------------------------------------------------------- control
 
+    /**
+     * @return array|WP_Error
+     */
     public function start()
     {
         $state = self::get_state();
 
         if ($state['status'] === 'running') {
-            return new WP_Error('running', 'سینک کامل در حال اجرا است.');
+            return new WP_Error('running', __('سینک کامل در حال اجرا است.', 'wp-dorna'));
         }
 
         if ($state['status'] === 'paused') {
-            return new WP_Error('paused', 'یک سینک کامل متوقف‌شده وجود دارد؛ آن را ادامه دهید یا لغو کنید.');
+            return new WP_Error('paused', __('یک سینک کامل متوقف‌شده وجود دارد؛ آن را ادامه دهید یا لغو کنید.', 'wp-dorna'));
         }
 
         $state = array_merge(self::defaults(), array(
             'status'     => 'running',
             'run_id'     => wp_generate_password(8, false),
-            'started_at' => (new DateTimeImmutable('now', wp_timezone()))->format(DATE_ATOM),
+            'started_at' => Time::now_iso(),
         ));
 
         delete_option(self::SEEN_OPTION);
@@ -127,7 +145,7 @@ class WP_Dorna_Full_Sync
 
         $this->save_state($state);
         $this->schedule_cron();
-        WP_Dorna::write_log('WP Dorna full sync started (run ' . $state['run_id'] . ').');
+        $this->logger->info('سینک کامل شروع شد.', array('run' => $state['run_id']));
 
         return $state;
     }
@@ -171,7 +189,7 @@ class WP_Dorna_Full_Sync
         if (in_array($state['status'], $from, true)) {
             $state['status'] = $to;
             if ($to === 'cancelled') {
-                $state['finished_at'] = (new DateTimeImmutable('now', wp_timezone()))->format(DATE_ATOM);
+                $state['finished_at'] = Time::now_iso();
             }
             $this->save_state($state);
         }
@@ -191,17 +209,13 @@ class WP_Dorna_Full_Sync
     }
 
     /**
-     * @param int  $max_pages  pages to process at most in this call
-     * @param bool $may_sleep  wait for the pacing delay (cron) or return at once (browser)
-     * @param int  $budget     seconds after which no new page is started
+     * @param int  $max_pages pages to process at most in this call
+     * @param bool $may_sleep wait for the pacing delay (cron) or return at once (browser)
+     * @param int  $budget    seconds after which no new page is started
      */
     public function tick($max_pages = 1, $may_sleep = false, $budget = 20)
     {
-        if (!self::is_running()) {
-            return self::get_state();
-        }
-
-        if (!$this->core->acquire_lock(self::LOCK, 5 * MINUTE_IN_SECONDS)) {
+        if (!self::is_running() || !$this->lock->acquire(self::LOCK, 5 * MINUTE_IN_SECONDS)) {
             return self::get_state();
         }
 
@@ -234,10 +248,10 @@ class WP_Dorna_Full_Sync
             }
         } catch (Throwable $e) {
             $state = self::get_state();
-            $this->register_error($state, 'Unexpected error: ' . $e->getMessage());
+            $this->register_error($state, 'خطای پیش‌بینی‌نشده: ' . $e->getMessage());
             $this->save_progress($state);
         } finally {
-            $this->core->release_lock(self::LOCK);
+            $this->lock->release(self::LOCK);
         }
 
         return self::get_state();
@@ -246,16 +260,13 @@ class WP_Dorna_Full_Sync
     private function register_error(array &$state, $message)
     {
         $state['consecutive_errors']++;
-        $state['last_error'] = $message;
-        $state['errors']     = array_slice(array_merge($state['errors'], array(
-            wp_date('H:i:s') . ' — ' . sprintf('صفحه %d: %s', $state['page'], $message),
+        $state['last_error']      = $message;
+        $state['errors']          = array_slice(array_merge($state['errors'], array(
+            wp_date('H:i:s') . ' — ' . sprintf(__('صفحه %1$d: %2$s', 'wp-dorna'), $state['page'], $message),
         )), -10);
+        $state['next_allowed_at'] = microtime(true) + Backoff::error_delay($state['consecutive_errors']);
 
-        // 30s, 60s, 120s ... capped at 5 minutes
-        $backoff                  = min(300, 30 * pow(2, $state['consecutive_errors'] - 1));
-        $state['next_allowed_at'] = microtime(true) + $backoff;
-
-        WP_Dorna::write_log(sprintf('WP Dorna full sync error (page %d, attempt %d): %s', $state['page'], $state['consecutive_errors'], $message));
+        $this->logger->error('خطا در سینک کامل.', array('page' => $state['page'], 'attempt' => $state['consecutive_errors'], 'reason' => $message));
 
         if ($state['consecutive_errors'] >= self::MAX_CONSECUTIVE_ERRORS) {
             $state['status'] = 'failed';
@@ -283,11 +294,10 @@ class WP_Dorna_Full_Sync
 
     private function process_page(array $state)
     {
-        $api      = new WP_Dorna_API();
-        $response = $api->get_data($api::PRODUCTS_ENDPOINT . '?' . http_build_query(array('page' => $state['page'], 'include_inactive' => 1)));
+        $response = $this->client->get_data(Client::PRODUCTS_ENDPOINT . '?' . http_build_query(array('page' => $state['page'], 'include_inactive' => 1)));
 
         if (!is_wp_error($response) && (!isset($response['data']) || !is_array($response['data']))) {
-            $response = new WP_Error('api_error', 'فرمت پاسخ درنا نامعتبر است.');
+            $response = new WP_Error('api_error', __('قالب پاسخ درنا نامعتبر است.', 'wp-dorna'));
         }
 
         if (is_wp_error($response)) {
@@ -299,9 +309,7 @@ class WP_Dorna_Full_Sync
         $state['consecutive_errors'] = 0;
 
         if (empty($state['server_time'])) {
-            $state['server_time'] = !empty($response['server_time'])
-                ? $response['server_time']
-                : (new DateTimeImmutable('now', wp_timezone()))->format(DATE_ATOM);
+            $state['server_time'] = !empty($response['server_time']) ? $response['server_time'] : Time::now_iso();
         }
 
         $state['total']     = isset($response['total']) ? (int) $response['total'] : $state['total'];
@@ -311,7 +319,7 @@ class WP_Dorna_Full_Sync
         $inactive = array();
 
         foreach ($response['data'] as $product) {
-            $key = WP_Dorna::normalize_sku($product['sku'] ?? '');
+            $key = Sku::normalize($product['sku'] ?? '');
             if ($key === '') {
                 continue;
             }
@@ -324,7 +332,7 @@ class WP_Dorna_Full_Sync
             $products[$key] = $product;
         }
 
-        $result = $this->core->apply_dorna_products($products, $inactive);
+        $result = $this->writer->apply_batch($products, $inactive);
 
         $state['checked']    += count($response['data']);
         $state['updated']    += $result['updated'];
@@ -341,7 +349,7 @@ class WP_Dorna_Full_Sync
 
         if ($has_more && $state['page'] >= self::MAX_PAGES) {
             $state['status']     = 'failed';
-            $state['last_error'] = 'تعداد صفحه‌ها بیش از حد مجاز است.';
+            $state['last_error'] = __('تعداد صفحه‌ها بیش از حد مجاز است.', 'wp-dorna');
             $has_more            = false;
         }
 
@@ -358,18 +366,18 @@ class WP_Dorna_Full_Sync
     private function finish(array &$state)
     {
         $state['status']      = 'completed';
-        $state['finished_at'] = (new DateTimeImmutable('now', wp_timezone()))->format(DATE_ATOM);
+        $state['finished_at'] = Time::now_iso();
 
-        // Whatever changed in Dorna while this pass was running is picked up by
-        // the next minute sync, which starts from when the pass began.
+        // Whatever changed in Dorna while this pass was running is picked up by the
+        // minute sync, which starts from when the pass began.
         if (!empty($state['server_time'])) {
-            update_option(WP_Dorna::LAST_UPDATE_OPTION, $state['server_time']);
+            Status::set_synced_until($state['server_time']);
         }
 
-        // Store products Dorna did not list at all (not an error: the store may
-        // sell items that are not managed in Dorna).
+        // Store products Dorna did not list at all (not an error: the store may sell
+        // items that are not managed in Dorna).
         $seen   = get_option(self::SEEN_OPTION, array());
-        $unseen = array_keys(array_diff_key($this->core->get_woo_ids_by_sku(), array_flip(is_array($seen) ? $seen : array())));
+        $unseen = array_keys(array_diff_key($this->writer->sku_map(), array_flip(is_array($seen) ? $seen : array())));
         sort($unseen);
 
         $state['not_in_dorna'] = count($unseen);
@@ -378,54 +386,22 @@ class WP_Dorna_Full_Sync
 
         wp_clear_scheduled_hook(self::CRON_HOOK);
 
-        WP_Dorna::write_log(sprintf(
-            'WP Dorna full sync finished (run %s): checked %d, updated %d, unchanged %d, failed %d, not in the store %d, not in Dorna %d.',
-            $state['run_id'],
-            $state['checked'],
-            $state['updated'],
-            $state['unchanged'],
-            $state['failed'],
-            $state['missing'],
-            $state['not_in_dorna']
+        $this->logger->info('سینک کامل تمام شد.', array(
+            'run'          => $state['run_id'],
+            'checked'      => $state['checked'],
+            'updated'      => $state['updated'],
+            'unchanged'    => $state['unchanged'],
+            'failed'       => $state['failed'],
+            'not_in_store' => $state['missing'],
+            'not_in_dorna' => $state['not_in_dorna'],
         ));
     }
 
-    // -------------------------------------------------------------------- UI
+    // ---------------------------------------------------------------- payload
 
-    public function ajax()
-    {
-        check_ajax_referer('wp_dorna_full_sync_nonce');
-
-        if (!current_user_can('manage_options')) {
-            wp_send_json_error(array('message' => 'دسترسی کافی ندارید.'), 403);
-        }
-
-        $command = isset($_POST['command']) ? sanitize_key($_POST['command']) : 'status';
-
-        switch ($command) {
-            case 'start':
-                $result = $this->start();
-                if (is_wp_error($result)) {
-                    wp_send_json_error(array('message' => $result->get_error_message()));
-                }
-                break;
-            case 'pause':
-                $this->pause();
-                break;
-            case 'resume':
-                $this->resume();
-                break;
-            case 'cancel':
-                $this->cancel();
-                break;
-            case 'tick':
-                $this->tick(1, false);
-                break;
-        }
-
-        wp_send_json_success($this->payload());
-    }
-
+    /**
+     * State plus what the screen needs to draw it.
+     */
     public function payload()
     {
         $state = self::get_state();
@@ -438,74 +414,12 @@ class WP_Dorna_Full_Sync
             $percent = 0;
         }
 
-        $state['percent']          = $percent;
-        $state['pages_left']       = max(0, $state['last_page'] - $state['page'] + 1);
-        $state['delay']            = $this->delay();
+        $state['percent']           = $percent;
+        $state['pages_left']        = max(0, $state['last_page'] - $state['page'] + 1);
+        $state['delay']             = $this->delay();
         $state['not_in_dorna_skus'] = $state['status'] === 'completed' ? (array) get_option(self::REPORT_OPTION, array()) : array();
         unset($state['next_allowed_at']);
 
         return $state;
-    }
-
-    public function enqueue_assets($hook)
-    {
-        if ($hook !== 'settings_page_wp-dorna-settings') {
-            return;
-        }
-
-        wp_enqueue_style('wp-dorna-full-sync', WP_DORNA_PLUGIN_URL . 'assets/css/full-sync.css', array(), WP_DORNA_VERSION);
-        wp_enqueue_script('wp-dorna-full-sync', WP_DORNA_PLUGIN_URL . 'assets/js/full-sync.js', array('jquery'), WP_DORNA_VERSION, true);
-        wp_localize_script('wp-dorna-full-sync', 'wpDornaFullSync', array(
-            'ajaxUrl' => admin_url('admin-ajax.php'),
-            'nonce'   => wp_create_nonce('wp_dorna_full_sync_nonce'),
-            'state'   => $this->payload(),
-        ));
-    }
-
-    public function render_tab()
-    {
-        ?>
-        <div id="tab-full-sync" class="wp-dorna-tab-content" style="display:none;">
-            <h2>سینک کامل</h2>
-            <p>همه‌ی کالاهای درنا را یک‌بار، آرام و صفحه‌به‌صفحه بررسی می‌کند و قیمت و موجودی کالاهای هم‌کد (SKU) در سایت را با درنا یکی می‌کند. این کار فشار کمی به درنا می‌آورد (هر چند ثانیه یک درخواست) و با بستن صفحه هم در پس‌زمینه ادامه پیدا می‌کند. در طول اجرا، بروزرسانی خودکار هر دقیقه متوقف است.</p>
-
-            <div class="wp-dorna-box" id="wp-dorna-fs">
-                <div class="wp-dorna-fs-head">
-                    <strong id="wp-dorna-fs-status">—</strong>
-                    <span id="wp-dorna-fs-eta"></span>
-                </div>
-
-                <div class="wp-dorna-fs-bar" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
-                    <div class="wp-dorna-fs-bar-fill" id="wp-dorna-fs-fill"></div>
-                    <span id="wp-dorna-fs-percent">0٪</span>
-                </div>
-
-                <div class="wp-dorna-fs-stats">
-                    <div><span id="wp-dorna-fs-checked">0</span><small>بررسی‌شده از <b id="wp-dorna-fs-total">0</b></small></div>
-                    <div><span id="wp-dorna-fs-updated">0</span><small>بروزرسانی‌شده</small></div>
-                    <div><span id="wp-dorna-fs-unchanged">0</span><small>بدون تغییر</small></div>
-                    <div><span id="wp-dorna-fs-missing">0</span><small>در سایت نیست</small></div>
-                    <div><span id="wp-dorna-fs-failed">0</span><small>خطا</small></div>
-                </div>
-
-                <p class="wp-dorna-fs-note" id="wp-dorna-fs-note"></p>
-
-                <div class="wp-dorna-fs-actions">
-                    <button type="button" class="button button-primary" data-fs="start">شروع سینک کامل</button>
-                    <button type="button" class="button" data-fs="pause">توقف</button>
-                    <button type="button" class="button button-primary" data-fs="resume">ادامه</button>
-                    <button type="button" class="button" data-fs="cancel">لغو</button>
-                </div>
-
-                <ul class="wp-dorna-fs-errors" id="wp-dorna-fs-errors"></ul>
-
-                <details id="wp-dorna-fs-report" style="display:none;">
-                    <summary>کالاهای سایت که در درنا پیدا نشدند (<span id="wp-dorna-fs-report-count">0</span>)</summary>
-                    <p>این کالاها در درنا وجود ندارند یا غیرفعال‌اند و تغییری در آن‌ها داده نشده است.</p>
-                    <textarea readonly rows="8" id="wp-dorna-fs-report-list" dir="ltr"></textarea>
-                </details>
-            </div>
-        </div>
-        <?php
     }
 }

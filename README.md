@@ -1,6 +1,6 @@
 # WP Dorna
 
-[![WordPress](https://img.shields.io/badge/WordPress-5.0%2B-blue.svg)](https://wordpress.org/)
+[![WordPress](https://img.shields.io/badge/WordPress-5.3%2B-blue.svg)](https://wordpress.org/)
 [![WooCommerce](https://img.shields.io/badge/WooCommerce-3.0%2B-purple.svg)](https://woocommerce.com/)
 [![License](https://img.shields.io/badge/License-GPL2-green.svg)](https://www.gnu.org/licenses/gpl-2.0.html)
 [![Version](https://img.shields.io/badge/Version-1.1.2-orange.svg)](https://github.com/alifallahrn/wp-dorna/releases)
@@ -9,19 +9,19 @@ A powerful WordPress plugin that seamlessly integrates WooCommerce with the Dorn
 
 ## 🚀 Features
 
-- **Automated Product Sync**: Automatically synchronize your WooCommerce products with the Dorna platform
-- **Real-time Updates**: Products are updated every minute to ensure data consistency
-- **Invoice Integration**: Automatically create invoices in Dorna when WooCommerce orders are processed or completed
-- **Bulk Product Import**: Import products from Dorna platform with a user-friendly interface
-- **Individual Product Sync**: Manually sync specific products when needed
-- **API Integration**: Secure REST API communication with the Dorna platform
-- **Error Logging**: Comprehensive logging system for troubleshooting
-- **Auto-updates**: Built-in update checker for seamless plugin updates
+- **Automatic product sync**: price, discount and stock are pulled from Dorna every minute. A failed request never loses changes: the sync resumes from the last *successful* run.
+- **Full sync with progress**: one slow, paced pass over all Dorna products (one request every few seconds, pausable and resumable) to make sure the store matches Dorna.
+- **Invoices**: orders are sent to Dorna when they become *processing* or *completed*; failures are retried with growing pauses and shown with their reason.
+- **Bulk import**: bring Dorna products that the store lacks in as drafts.
+- **Per-product update**: an "update from Dorna" button on the product screen.
+- **Designed admin**: a Persian, RTL admin area in the look of the Dorna panel — overview, full sync, import, orders, logs and settings.
+- **Safe by default**: capability + nonce on every action, token masked and removable from the database (`WP_DORNA_API_KEY` in wp-config.php), logs without secrets.
+- **Auto-updates**: built-in update checker for GitHub releases.
 
 ## 📋 Requirements
 
-- WordPress 5.0 or higher
-- WooCommerce 3.0 or higher
+- WordPress 5.3 or higher
+- WooCommerce (required; not version-tested below a current release)
 - PHP 7.4 or higher
 - Active Dorna platform account with API access
 - SSL certificate (recommended for secure API communication)
@@ -47,17 +47,18 @@ A powerful WordPress plugin that seamlessly integrates WooCommerce with the Dorn
 
 ### Initial Setup
 
-1. After activation, navigate to **WooCommerce > Dorna Settings** in your WordPress admin
-2. Enter your Dorna API key in the settings
-3. Save the configuration
+1. After activation, open the **درنا** menu in your WordPress admin and go to **تنظیمات**
+2. Paste your Dorna token (or define `WP_DORNA_API_KEY` in `wp-config.php`)
+3. Save, then press **آزمایش اتصال**
+4. Run **سینک کامل** once so the whole catalog is matched
 
 ## 📖 Usage
 
 ### Automatic Product Synchronization
 
 Once configured, the plugin automatically:
-- Syncs products from Dorna to WooCommerce every minute
-- Updates existing product information
+- Syncs price, discount and stock from Dorna to WooCommerce every minute
+- Sends orders to Dorna as invoices and retries the ones that failed
 
 ## 🤝 Contributing
 
