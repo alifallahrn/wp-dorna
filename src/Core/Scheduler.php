@@ -44,6 +44,7 @@ class Scheduler
         add_action(self::RETRY_HOOK, array($this->retry, 'run'));
         add_action(self::LOG_PURGE_HOOK, array($this->logger, 'purge_old'));
         add_action(self::HEARTBEAT_HOOK, array($this->heartbeat, 'send'));
+        add_action('wp_dorna_state_changed', array($this->heartbeat, 'send'));
         add_action(self::SCHEDULED_FULL_SYNC_HOOK, array($this->scheduled, 'run'));
 
         $this->ensure(self::PRODUCTS_HOOK, 'every_minute');

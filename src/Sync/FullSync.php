@@ -387,6 +387,7 @@ class FullSync
         delete_option(self::SEEN_OPTION);
 
         wp_clear_scheduled_hook(self::CRON_HOOK);
+        do_action('wp_dorna_state_changed');
 
         $this->logger->info('سینک کامل تمام شد.', array(
             'run'          => $state['run_id'],

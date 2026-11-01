@@ -10,6 +10,7 @@ use WPDorna\Core\Wizard;
 use WPDorna\Support\Flash;
 use WPDorna\Support\Logger;
 use WPDorna\Support\Site;
+use WPDorna\Sync\Status;
 
 /**
  * "Connect to Dorna": the browser goes to Dorna, the owner signs in, picks the
@@ -190,6 +191,10 @@ class ConnectionService
         $this->settings->set_api_key($result['token']);
         $this->connection->save_connected($result);
         $this->logger->info('به درنا وصل شد.', array('business' => isset($result['business']['username']) ? $result['business']['username'] : ''));
+
+        // Whatever failed before (usually the old token being refused) is history now: do not
+        // carry it into the new connection's first report.
+        Status::update(array('last_error' => null, 'error_kind' => null));
 
         // Dorna's card shows the site from now on, without waiting for the cron.
         $this->heartbeat->send();

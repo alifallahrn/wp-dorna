@@ -46,6 +46,8 @@ class IncrementalSync
             @set_time_limit(0);
         }
 
+        $had_error = Status::get()['last_error'] !== null;
+
         try {
             $this->sync();
         } catch (Throwable $e) {
@@ -53,12 +55,42 @@ class IncrementalSync
         } finally {
             $this->lock->release(self::LOCK);
         }
+
+        // Healthy <-> failing: tell Dorna now, not at the next scheduled heartbeat, so its
+        // card never keeps showing a problem that is already over (or hides a new one).
+        if (($had_error) !== (Status::get()['last_error'] !== null)) {
+            do_action('wp_dorna_state_changed');
+        }
     }
 
-    private function fail($message)
+    /**
+     * auth: the token was refused; network: no answer at all; rate / server: Dorna
+     * is busy or down (temporary); other: anything else.
+     */
+    private static function kind($response)
     {
-        $this->logger->error('بروزرسانی خودکار محصولات ناموفق بود.', array('reason' => $message));
-        Status::update(array('last_attempt' => Time::now_iso(), 'last_error' => $message));
+        $data   = is_wp_error($response) ? $response->get_error_data() : null;
+        $status = is_array($data) && isset($data['status']) ? (int) $data['status'] : -1;
+
+        if ($status === 401 || $status === 403) {
+            return 'auth';
+        }
+
+        if ($status === 0) {
+            return 'network';
+        }
+
+        if ($status === 429) {
+            return 'rate';
+        }
+
+        return $status >= 500 ? 'server' : 'other';
+    }
+
+    private function fail($message, $kind = 'other')
+    {
+        $this->logger->error('بروزرسانی خودکار محصولات ناموفق بود.', array('reason' => $message, 'kind' => $kind));
+        Status::update(array('last_attempt' => Time::now_iso(), 'last_error' => $message, 'error_kind' => $kind));
     }
 
     private function sync()
@@ -82,7 +114,7 @@ class IncrementalSync
             // The synced-until time must NOT advance when a page failed, or the
             // changes in that window are lost for good.
             if (is_wp_error($response)) {
-                $this->fail(sprintf('صفحه %d: %s', $page, $response->get_error_message()));
+                $this->fail(sprintf('صفحه %d: %s', $page, $response->get_error_message()), self::kind($response));
                 return;
             }
 
@@ -132,6 +164,7 @@ class IncrementalSync
             'last_attempt' => Time::now_iso(),
             'last_success' => $synced_at,
             'last_error'   => null,
+            'error_kind'   => null,
             'last_stats'   => $stats,
         ));
     }

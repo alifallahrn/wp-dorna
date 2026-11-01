@@ -48,6 +48,7 @@ class Heartbeat
                 'last_attempt' => $sync['last_attempt'],
                 'last_success' => $sync['last_success'],
                 'last_error'   => $sync['last_error'],
+                'error_kind'   => $sync['error_kind'],
             ),
             'full_sync'      => array(
                 'status'      => $full['status'],

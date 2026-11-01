@@ -18,6 +18,8 @@ class Status
             'last_attempt' => null,
             'last_success' => null,
             'last_error'   => null,
+            // auth | network | rate | server | other: what kind of failure last_error was
+            'error_kind'   => null,
             'last_stats'   => array(),
         ), is_array($status) ? $status : array());
     }

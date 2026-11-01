@@ -109,9 +109,13 @@ try {
     $requests = array();
     $services->incremental->run();
     check('incremental: error does not advance the synced time', Status::synced_until() === '2026-10-01T00:00:00+03:30');
-    check('incremental: GET retried 3 times with a 30s timeout', count($requests) === 3 && $requests[0]['timeout'] === 30);
-    check('incremental: since has the overlap, include_inactive asked', strpos($requests[0]['url'], 'since=2026-09-30T23%3A55%3A00%2B03%3A30') !== false && strpos($requests[0]['url'], 'include_inactive=1') !== false);
+    $gets = array_values(array_filter($requests, function ($r) { return $r['method'] === 'GET'; }));
+    check('incremental: GET retried 3 times with a 30s timeout', count($gets) === 3 && $gets[0]['timeout'] === 30);
+    check('incremental: since has the overlap, include_inactive asked', strpos($gets[0]['url'], 'since=2026-09-30T23%3A55%3A00%2B03%3A30') !== false && strpos($requests[0]['url'], 'include_inactive=1') !== false);
     check('incremental: error recorded in friendly words', strpos((string) Status::get()['last_error'], 'درنا') !== false);
+    check('incremental: the failure kind is recorded (server = Dorna down, temporary)', Status::get()['error_kind'] === 'server');
+    $beats = array_values(array_filter($requests, function ($r) { return strpos($r['url'], 'connect/heartbeat') !== false; }));
+    check('state change: Dorna is told at once that the sync started failing, with its kind', count($beats) === 1 && $beats[0]['body']['health']['product_sync']['error_kind'] === 'server' && $beats[0]['body']['health']['product_sync']['last_error'] !== null);
 
     $fake = function ($m, $u) use ($page, $item) {
         return strpos($u, 'page=2') !== false ? array(502, array()) : array(200, $page(array($item), 1, 2));
@@ -122,6 +126,7 @@ try {
     $fake = function ($m, $u) use ($page, $item) { return array(200, $page(array($item))); };
     $services->incremental->run();
     check('incremental: success stores Dorna server_time', Status::synced_until() === '2026-11-01T12:00:00+03:30');
+    check('incremental: a success clears the error and its kind', Status::get()['last_error'] === null && Status::get()['error_kind'] === null);
     check('incremental: stock + price written via normalized SKU', (int) wc_get_product($product->get_id())->get_stock_quantity() === 7);
     $stats = Status::get()['last_stats'];
     check('incremental: stats saved', $stats['updated'] === 1 && $stats['failed'] === 0);
@@ -406,6 +411,41 @@ try {
     check('schedule: no full sync while Dorna refuses the token', $sched->run($now) === 'no_connection');
     $conn->clear();
     $services->settings->save_schedule(array('mode' => 'off', 'next_due' => ''));
+
+
+    // ------------------------------------- the card must never show a finished problem
+    $conn->clear();
+    $conn->set_manual();
+    Status::update(array('last_error' => 'x', 'error_kind' => 'server'));
+    $requests = array();
+    $fake = function ($m, $u) use ($page) { return array(200, $page(array())); };
+    $services->incremental->run();
+    $beats = array_values(array_filter($requests, function ($r) { return strpos($r['url'], 'connect/heartbeat') !== false; }));
+    check('recovery: the first good sync after a failure sends a heartbeat without the error', count($beats) === 1 && $beats[0]['body']['health']['product_sync']['last_error'] === null && $beats[0]['body']['health']['product_sync']['error_kind'] === null);
+
+    $requests = array();
+    $services->incremental->run();
+    check('recovery: a sync that changes nothing does not spam heartbeats', !array_filter($requests, function ($r) { return strpos($r['url'], 'connect/heartbeat') !== false; }));
+
+    $fake = function ($m, $u) { return array(401, array('message' => 'Unauthenticated.')); };
+    $services->incremental->run();
+    check('auth failure is classified as auth', Status::get()['error_kind'] === 'auth');
+    $conn->clear();
+
+    Status::update(array('last_error' => 'old token refused', 'error_kind' => 'auth'));
+    $requests = array();
+    $fake = function ($m, $u, $b) {
+        if (strpos($u, 'connect/exchange') !== false) {
+            return array(200, array('token' => '9|another-token-0123456789', 'business' => array('name' => 'x', 'username' => 'y'), 'site' => Site::origin()));
+        }
+        return array(200, array('ok' => true));
+    };
+    $services->connect->connect(str_repeat('c', 48), 'v');
+    $beats = array_values(array_filter($requests, function ($r) { return strpos($r['url'], 'connect/heartbeat') !== false; }));
+    check('connect: the error from before the new connection is cleared before the first report', Status::get()['last_error'] === null && count($beats) === 1 && $beats[0]['body']['health']['product_sync']['last_error'] === null);
+    $services->settings->set_api_key('test-token-123456');
+    $conn->clear();
+    $conn->set_manual();
 
     // ------------------------------------------------- ajax: nonce + capability
     $ajax = new Ajax($services);
