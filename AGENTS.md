@@ -34,6 +34,10 @@ uninstall.php                      # removes data only if the setting says so
 - **HPOS** compatibility is declared in `wp-dorna.php`. WooCommerce is required (the plugin shows a notice and stays idle without it).
 - **Auto-update** via GitHub releases using `plugin-update-checker`. No WordPress.org readme.txt.
 
+## Releases
+
+Pushing to `main` runs `.github/workflows/release.yml`: it lints (PHP 7.4) and runs `tests/run.php`, builds `wp-dorna-<version>.zip` (folder `wp-dorna/`, vendor included, dev files left out per `.distignore`) and publishes a GitHub release `v<version>` with the zip and the list of commits since the previous release. The version comes from `wp-dorna.php` (the `Version:` header and `WP_DORNA_VERSION` must match, see `bin/read-version.sh`), so **raise it before merging to `main`**. If that version already has a tag the run only prints a notice; a lower version than the latest tag fails the run. Build the same zip locally with `bin/build-release.sh <version>`; plugin-update-checker serves the release asset to installed sites. Shell scripts and workflows must stay LF (`.gitattributes`).
+
 ## Commands
 
 ```sh

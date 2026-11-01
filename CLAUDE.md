@@ -12,7 +12,7 @@ php tests/run.php                              # unit tests for the pure helpers
 WP_DORNA_TESTS=1 php tests/integration.php     # loads the local WP site (../../../../wp-load.php), fake HTTP, temp data; disposable dev site only
 ```
 
-The default branch is `development`; don't commit to `main` except when merging a PR.
+The default branch is `development`; don't commit to `main` except when merging a PR. A push to `main` publishes a GitHub release (zip + changes) for the version in `wp-dorna.php`: raise `Version:` and `WP_DORNA_VERSION` together before merging (details in AGENTS.md, "Releases").
 
 ## Architecture
 

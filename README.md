@@ -62,6 +62,10 @@ Once configured, the plugin automatically:
 - Syncs price, discount and stock from Dorna to WooCommerce every minute
 - Sends orders to Dorna as invoices and retries the ones that failed
 
+## 🚀 Releases
+
+Every push to `main` publishes a release on GitHub for the version in `wp-dorna.php`, with the ready-to-install zip and the list of changes. Raise the version (the `Version:` header and `WP_DORNA_VERSION`) before merging to `main`; the same zip can be built locally with `bin/build-release.sh <version>`.
+
 ## 🤝 Contributing
 
 We welcome contributions! Please feel free to submit issues and pull requests.

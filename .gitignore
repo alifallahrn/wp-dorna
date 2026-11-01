@@ -1,3 +1,4 @@
 /logs/*.log
 /logs/.htaccess
 /logs/index.php
+/dist/
