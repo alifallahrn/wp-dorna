@@ -2,6 +2,23 @@
 
 class WP_Dorna
 {
+    const LAST_UPDATE_OPTION = 'wp_dorna_last_product_update';
+    const SYNC_STATUS_OPTION = 'wp_dorna_sync_status';
+
+    // `since` is sent this far in the past: Dorna stamps updated_at inside a
+    // transaction, so a change can become visible after a sync already passed it.
+    const SYNC_OVERLAP_SECONDS = 300;
+    const MAX_SYNC_PAGES = 500;
+    const PAGE_DELAY_MICROSECONDS = 500000;
+
+    // Orders without an invoice in Dorna are retried for a week, with backoff.
+    const RETRY_WINDOW = 7 * DAY_IN_SECONDS;
+    const RETRY_BATCH = 15;
+    const RETRY_MAX_DELAY = 6 * HOUR_IN_SECONDS;
+
+    // Woo has already reduced the stock for these, Dorna does not know yet.
+    const PENDING_ORDER_WINDOW = 3 * DAY_IN_SECONDS;
+
     public function init()
     {
         add_filter('cron_schedules', function ($schedules) {
@@ -39,79 +56,347 @@ class WP_Dorna
         }
     }
 
-    public function update_products()
+    /**
+     * Same SKU spelled differently (spaces, Persian digits, case) must match.
+     */
+    public static function normalize_sku($sku)
     {
-        global $wpdb;
+        $sku = trim((string) $sku);
+        $sku = strtr($sku, array(
+            '۰' => '0', '۱' => '1', '۲' => '2', '۳' => '3', '۴' => '4',
+            '۵' => '5', '۶' => '6', '۷' => '7', '۸' => '8', '۹' => '9',
+            '٠' => '0', '١' => '1', '٢' => '2', '٣' => '3', '٤' => '4',
+            '٥' => '5', '٦' => '6', '٧' => '7', '٨' => '8', '٩' => '9',
+        ));
 
-        set_time_limit(0);
+        return function_exists('mb_strtolower') ? mb_strtolower($sku) : strtolower($sku);
+    }
 
-        $api = new WP_Dorna_API();
-        $apiEndpoint = $api::PRODUCTS_ENDPOINT;
+    /**
+     * Atomic through add_option (same approach as WP core's upgrade lock). A lock
+     * older than $ttl is considered dead.
+     */
+    private function acquire_lock($name, $ttl)
+    {
+        $key = 'wp_dorna_lock_' . $name;
+        $now = time();
 
-        $lastSync = get_option('wp_dorna_last_product_update', null);
-        if ($lastSync) {
-            $apiEndpoint = $apiEndpoint . '?since=' . urlencode($lastSync);
+        if (add_option($key, $now, '', 'no')) {
+            return true;
         }
 
-        $page = 1;
-        $dornaProducts = [];
+        $started = (int) get_option($key);
+        if ($started && ($now - $started) > $ttl) {
+            update_option($key, $now, false);
+            return true;
+        }
+
+        return false;
+    }
+
+    private function release_lock($name)
+    {
+        delete_option('wp_dorna_lock_' . $name);
+    }
+
+    private function update_sync_status(array $data)
+    {
+        $status = get_option(self::SYNC_STATUS_OPTION, array());
+        if (!is_array($status)) {
+            $status = array();
+        }
+
+        update_option(self::SYNC_STATUS_OPTION, array_merge($status, $data), false);
+    }
+
+    private function now_iso()
+    {
+        return (new DateTimeImmutable('now', wp_timezone()))->format(DATE_ATOM);
+    }
+
+    /**
+     * The stored value is either the ISO time returned by Dorna (has an offset) or
+     * a legacy site-local "Y-m-d H:i:s". Both end up as an ISO string with offset.
+     */
+    private function build_since($stored)
+    {
+        if (empty($stored)) {
+            return null;
+        }
+
+        try {
+            $time = new DateTimeImmutable($stored, wp_timezone());
+        } catch (Exception $e) {
+            return null;
+        }
+
+        return $time->modify('-' . self::SYNC_OVERLAP_SECONDS . ' seconds')->format(DATE_ATOM);
+    }
+
+    public function update_products()
+    {
+        if (!$this->acquire_lock('products', 10 * MINUTE_IN_SECONDS)) {
+            return;
+        }
+
+        if (function_exists('set_time_limit')) {
+            @set_time_limit(0);
+        }
+
+        try {
+            $this->run_product_sync();
+        } catch (Throwable $e) {
+            $this->fail_product_sync('Unexpected error: ' . $e->getMessage());
+        } finally {
+            $this->release_lock('products');
+        }
+    }
+
+    private function fail_product_sync($message)
+    {
+        $this->log_error('WP Dorna product sync FAILED: ' . $message);
+        $this->update_sync_status(array(
+            'last_attempt' => $this->now_iso(),
+            'last_error'   => $message,
+        ));
+    }
+
+    private function run_product_sync()
+    {
+        $api         = new WP_Dorna_API();
+        $since       = $this->build_since(get_option(self::LAST_UPDATE_OPTION, null));
+        $fallback_at = $this->now_iso();
+        $server_time = null;
+
+        $dorna_products = array();
+        $inactive       = array();
+        $page           = 1;
 
         do {
-            $endpoint = $apiEndpoint . ($lastSync ? '&page=' . $page : '?page=' . $page);
-            $response = $api->get_data($endpoint);
-
-            if (!is_array($response) || empty($response['data'])) {
-                break;
+            $query = array('page' => $page, 'include_inactive' => 1);
+            if ($since) {
+                $query['since'] = $since;
             }
 
-            $filteredProducts = array_filter($response['data'], function ($product) {
-                return !empty($product['sku']);
-            });
+            $response = $api->get_data($api::PRODUCTS_ENDPOINT . '?' . http_build_query($query));
 
-            foreach ($filteredProducts as $p) $dornaProducts[$p['sku']] = $p;
+            // The last-sync time must NOT advance when a page failed, or the
+            // changes in that window are lost for good.
+            if (is_wp_error($response)) {
+                $this->fail_product_sync(sprintf('page %d: %s', $page, $response->get_error_message()));
+                return;
+            }
 
-            $hasMore = isset($response['current_page'], $response['last_page']) && $response['current_page'] < $response['last_page'];
+            if (!isset($response['data']) || !is_array($response['data'])) {
+                $this->fail_product_sync(sprintf('page %d: invalid response format', $page));
+                return;
+            }
+
+            if ($server_time === null && !empty($response['server_time'])) {
+                $server_time = $response['server_time'];
+            }
+
+            foreach ($response['data'] as $product) {
+                $key = self::normalize_sku($product['sku'] ?? '');
+                if ($key === '') {
+                    continue;
+                }
+
+                if (isset($product['is_active']) && !$product['is_active']) {
+                    $inactive[$key] = $product['sku'];
+                    continue;
+                }
+
+                $dorna_products[$key] = $product;
+            }
+
+            $has_more = isset($response['current_page'], $response['last_page']) && $response['current_page'] < $response['last_page'];
             $page++;
-        } while ($hasMore);
 
-        if (!empty($dornaProducts)) {
-            $wooProductsResults = $wpdb->get_results("SELECT post_id, meta_value as sku FROM {$wpdb->prefix}postmeta WHERE meta_key = '_sku'");
-            $wooProducts = wp_list_pluck($wooProductsResults, 'post_id', 'sku');
+            if ($has_more) {
+                usleep(self::PAGE_DELAY_MICROSECONDS);
+            }
+        } while ($has_more && $page <= self::MAX_SYNC_PAGES);
 
-            $products = array_intersect_key($dornaProducts, $wooProducts);
+        $stats = array('fetched' => count($dorna_products), 'updated' => 0, 'failed' => 0, 'stock_held' => 0, 'inactive' => 0);
 
-            $currency = get_woocommerce_currency();
+        if (!empty($dorna_products) || !empty($inactive)) {
+            $woo_ids = $this->get_woo_ids_by_sku();
 
-            foreach ($products as $sku => $product) {
-                $existing_product_id = $wooProducts[$sku] ?? null;
-                if ($existing_product_id) {
-                    $wc_product = wc_get_product($existing_product_id);
-                    if ($wc_product) {
+            foreach ($inactive as $key => $sku) {
+                if (isset($woo_ids[$key])) {
+                    $stats['inactive']++;
+                    $this->log_error(sprintf('WP Dorna: product SKU %s is inactive in Dorna but still exists in the store (not changed).', $sku));
+                }
+            }
+
+            $pending_product_ids = !empty($dorna_products) ? $this->get_pending_invoice_product_ids() : array();
+            $currency            = get_woocommerce_currency();
+
+            foreach ($dorna_products as $key => $product) {
+                if (!isset($woo_ids[$key])) {
+                    continue;
+                }
+
+                foreach ($woo_ids[$key] as $woo_id) {
+                    // Woo already reduced the stock for an order Dorna has not received
+                    // yet: Dorna's older number would put the sold units back.
+                    $hold_stock = isset($pending_product_ids[$woo_id]);
+
+                    try {
+                        $wc_product = wc_get_product($woo_id);
+                        if (!$wc_product) {
+                            continue;
+                        }
+
                         $this->apply_dorna_pricing($wc_product, $product, $currency);
-                        $wc_product->set_manage_stock(true);
-                        $wc_product->set_stock_quantity($product['stock']);
+
+                        if ($hold_stock) {
+                            $stats['stock_held']++;
+                        } elseif (isset($product['stock']) && is_numeric($product['stock'])) {
+                            $wc_product->set_manage_stock(true);
+                            $wc_product->set_stock_quantity(wc_stock_amount($product['stock']));
+                        }
+
                         $wc_product->save();
+                        $stats['updated']++;
+                    } catch (Throwable $e) {
+                        $stats['failed']++;
+                        $this->log_error(sprintf('WP Dorna: updating SKU %s (product #%d) failed: %s', $product['sku'], $woo_id, $e->getMessage()));
                     }
                 }
             }
         }
 
-        update_option('wp_dorna_last_product_update', current_time('mysql'));
+        $synced_at = $server_time ? $server_time : $fallback_at;
+        update_option(self::LAST_UPDATE_OPTION, $synced_at);
+
+        $this->update_sync_status(array(
+            'last_attempt' => $this->now_iso(),
+            'last_success' => $synced_at,
+            'last_error'   => null,
+            'last_stats'   => $stats,
+        ));
     }
 
-    public function retry_failed_orders()
+    /**
+     * Normalized SKU => [post ids] for every live product / variation.
+     */
+    private function get_woo_ids_by_sku()
+    {
+        global $wpdb;
+
+        $rows = $wpdb->get_results(
+            "SELECT pm.post_id, pm.meta_value AS sku
+            FROM {$wpdb->postmeta} pm
+            INNER JOIN {$wpdb->posts} p ON p.ID = pm.post_id
+            WHERE pm.meta_key = '_sku'
+              AND pm.meta_value <> ''
+              AND p.post_type IN ('product', 'product_variation')
+              AND p.post_status <> 'trash'"
+        );
+
+        $map = array();
+        foreach ((array) $rows as $row) {
+            $key = self::normalize_sku($row->sku);
+            if ($key === '') {
+                continue;
+            }
+            $map[$key][] = (int) $row->post_id;
+        }
+
+        foreach ($map as $key => $ids) {
+            if (count($ids) > 1) {
+                $this->log_error(sprintf('WP Dorna: SKU "%s" is used by more than one product (%s).', $key, implode(', ', $ids)));
+            }
+        }
+
+        return $map;
+    }
+
+    /**
+     * Product / variation ids (as array keys) of recent orders whose stock Woo
+     * already reduced but whose invoice Dorna has not received.
+     */
+    private function get_pending_invoice_product_ids()
     {
         $orders = wc_get_orders(array(
-            'status'       => array('processing', 'completed'),
-            'limit'        => -1,
-            'date_created' => '>' . (time() - 24 * HOUR_IN_SECONDS),
+            'status'       => array('on-hold', 'processing', 'completed'),
+            'limit'        => 200,
+            'date_created' => '>' . (time() - self::PENDING_ORDER_WINDOW),
             'meta_key'     => '_dorna_invoice_sent',
             'meta_compare' => 'NOT EXISTS',
         ));
 
+        $ids = array();
         foreach ($orders as $order) {
-            $this->create_invoice_in_dorna($order->get_id());
+            foreach ($order->get_items() as $item) {
+                $ids[(int) $item->get_product_id()] = true;
+                if ($item->get_variation_id()) {
+                    $ids[(int) $item->get_variation_id()] = true;
+                }
+            }
         }
+
+        return $ids;
+    }
+
+    public function retry_failed_orders()
+    {
+        if (!$this->acquire_lock('retry', 10 * MINUTE_IN_SECONDS)) {
+            return;
+        }
+
+        try {
+            $orders = wc_get_orders(array(
+                'status'       => array('processing', 'completed'),
+                'limit'        => 100,
+                'orderby'      => 'date',
+                'order'        => 'ASC',
+                'date_created' => '>' . (time() - self::RETRY_WINDOW),
+                'meta_key'     => '_dorna_invoice_sent',
+                'meta_compare' => 'NOT EXISTS',
+            ));
+
+            $sent = 0;
+            foreach ($orders as $order) {
+                if ($sent >= self::RETRY_BATCH) {
+                    break;
+                }
+
+                if (!$this->is_retry_due($order)) {
+                    continue;
+                }
+
+                $this->create_invoice_in_dorna($order->get_id());
+                $sent++;
+
+                sleep(1);
+            }
+        } finally {
+            $this->release_lock('retry');
+        }
+    }
+
+    // 5 min after the first failure, then doubling, capped at 6 hours.
+    private function is_retry_due($order)
+    {
+        $attempts = (int) $order->get_meta('_dorna_invoice_attempts');
+        if ($attempts < 1) {
+            return true;
+        }
+
+        $delay = min(self::RETRY_MAX_DELAY, 5 * MINUTE_IN_SECONDS * pow(2, $attempts - 1));
+
+        return (time() - (int) $order->get_meta('_dorna_invoice_last_attempt')) >= $delay;
+    }
+
+    private function record_invoice_failure($order, $message)
+    {
+        $order->update_meta_data('_dorna_invoice_error', $message);
+        $order->update_meta_data('_dorna_invoice_attempts', (int) $order->get_meta('_dorna_invoice_attempts') + 1);
+        $order->update_meta_data('_dorna_invoice_last_attempt', time());
+        $order->save();
     }
 
     public function create_invoice_in_dorna($order_id)
@@ -121,7 +406,25 @@ class WP_Dorna
         if (!$order || $order->get_meta('_dorna_invoice_sent')) {
             return;
         }
-        $api = new WP_Dorna_API();
+
+        // A timed out request can still be running on the Dorna side while the
+        // retry cron fires; one in-flight request per order.
+        $lock = 'invoice_' . $order_id;
+        if (!$this->acquire_lock($lock, 2 * MINUTE_IN_SECONDS)) {
+            return;
+        }
+
+        try {
+            $this->send_invoice($order);
+        } finally {
+            $this->release_lock($lock);
+        }
+    }
+
+    private function send_invoice($order)
+    {
+        $order_id = $order->get_id();
+        $api      = new WP_Dorna_API();
 
         $currency = get_woocommerce_currency();
 
@@ -163,7 +466,16 @@ class WP_Dorna
             $product = $item->get_product();
 
             if (! $product) {
+                $this->log_error(sprintf('WP Dorna: order #%d item "%s" has no product anymore and was left out of the invoice.', $order_id, $item->get_name()));
                 continue;
+            }
+
+            // Dorna rejects the WHOLE invoice when one item has no SKU.
+            if (trim((string) $product->get_sku()) === '') {
+                $message = sprintf('کالای «%s» کد کالا (SKU) ندارد.', $item->get_name());
+                $this->log_error(sprintf('WP Dorna invoice NOT sent (order #%d): %s', $order_id, $message));
+                $this->record_invoice_failure($order, $message);
+                return;
             }
 
             if ($currency == 'IRT') {
@@ -183,17 +495,31 @@ class WP_Dorna
         $response = $api->post_data($api::INVOICES_ENDPOINT, $invoice_data);
 
         if (is_wp_error($response)) {
-            $this->log_error(sprintf(
-                'WP Dorna invoice send FAILED (order #%d): %s | Payload: %s',
-                $order_id,
-                $response->get_error_message(),
-                json_encode($invoice_data)
-            ));
-            return;
+            $error_data = $response->get_error_data();
+            $status     = is_array($error_data) && isset($error_data['status']) ? (int) $error_data['status'] : 0;
+
+            // Older Dorna versions answer a repeated order_id with 400: the invoice
+            // exists, so this order is done.
+            if ($status === 400 && stripos($response->get_error_message(), 'already exists') !== false) {
+                $response = array();
+            } else {
+                $this->log_error(sprintf(
+                    'WP Dorna invoice send FAILED (order #%d, HTTP %d): %s | Payload: %s',
+                    $order_id,
+                    $status,
+                    $response->get_error_message(),
+                    wp_json_encode($invoice_data)
+                ));
+                $this->record_invoice_failure($order, $response->get_error_message());
+                return;
+            }
         }
 
         $order->update_meta_data('_dorna_invoice_sent', true);
         $order->update_meta_data('_dorna_invoice_id', $response['invoice_id'] ?? '');
+        $order->delete_meta_data('_dorna_invoice_error');
+        $order->delete_meta_data('_dorna_invoice_attempts');
+        $order->delete_meta_data('_dorna_invoice_last_attempt');
         $order->save();
     }
 
@@ -232,7 +558,20 @@ class WP_Dorna
     // save error logs to files day to day in plugin folder
     public function log_error($message)
     {
-        $log_file = WP_DORNA_PLUGIN_DIR . 'logs/' . date('Y-m-d') . '.log';
-        error_log('[' . date('Y-m-d H:i:s') . '] ' . $message . "\n", 3, $log_file);
+        self::write_log($message);
+    }
+
+    public static function write_log($message)
+    {
+        $dir = WP_DORNA_PLUGIN_DIR . 'logs/';
+
+        // The logs hold customer data (invoice payloads): never web-readable.
+        if (!file_exists($dir . '.htaccess')) {
+            wp_mkdir_p($dir);
+            @file_put_contents($dir . '.htaccess', "Require all denied\nDeny from all\n");
+            @file_put_contents($dir . 'index.php', "<?php\n// Silence is golden.\n");
+        }
+
+        error_log('[' . date('Y-m-d H:i:s') . '] ' . $message . "\n", 3, $dir . date('Y-m-d') . '.log');
     }
 }

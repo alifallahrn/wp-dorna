@@ -323,7 +323,10 @@ class WP_Dorna_Admin
 
     public function render_settings_page()
     {
-        $lastSync = get_option('wp_dorna_last_product_update', '');
+        $syncStatus = get_option(WP_Dorna::SYNC_STATUS_OPTION, array());
+        $syncStatus = is_array($syncStatus) ? $syncStatus : array();
+        $lastSync   = $syncStatus['last_success'] ?? get_option(WP_Dorna::LAST_UPDATE_OPTION, '');
+        $lastError  = $syncStatus['last_error'] ?? '';
         $log_file = WP_DORNA_PLUGIN_DIR . 'logs/' . date('Y-m-d') . '.log';
     ?>
 
@@ -516,6 +519,9 @@ class WP_Dorna_Admin
                         <div class="wp-dorna-box">
                             <h3>آخرین بروزرسانی محصولات</h3>
                             <p><?php echo $lastSync ? esc_html($lastSync) : '-'; ?></p>
+                            <?php if ($lastError) { ?>
+                                <p style="color:#B91C1C;">آخرین خطا: <?php echo esc_html($lastError); ?></p>
+                            <?php } ?>
                         </div>
                     </div>
 
@@ -763,7 +769,8 @@ class WP_Dorna_Admin
         if (wc_get_order($order_id)->get_meta('_dorna_invoice_sent')) {
             wp_send_json_success(['message' => 'سفارش با موفقیت به درنا ارسال شد.']);
         } else {
-            wp_send_json_error(['message' => 'ارسال به درنا ناموفق بود. لاگ‌های امروز را بررسی کنید.']);
+            $reason = wc_get_order($order_id)->get_meta('_dorna_invoice_error');
+            wp_send_json_error(['message' => 'ارسال به درنا ناموفق بود.' . ($reason ? ' علت: ' . $reason : ' لاگ‌های امروز را بررسی کنید.')]);
         }
     }
 
@@ -802,7 +809,6 @@ class WP_Dorna_Admin
     // save error logs to files day to day in plugin folder
     public function log_error($message)
     {
-        $log_file = WP_DORNA_PLUGIN_DIR . 'logs/' . date('Y-m-d') . '.log';
-        error_log('[' . date('Y-m-d H:i:s') . '] ' . $message . "\n", 3, $log_file);
+        WP_Dorna::write_log($message);
     }
 }
