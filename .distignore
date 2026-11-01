@@ -1,0 +1,14 @@
+# Files left out of the installable zip (one rsync pattern per line).
+.git
+.github
+.gitattributes
+.gitignore
+.distignore
+bin
+dist
+tests
+logs
+AGENTS.md
+CLAUDE.md
+composer.json
+composer.lock

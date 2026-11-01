@@ -1,68 +1,57 @@
 <?php
+/**
+ * Plugin Name: WP Dorna
+ * Plugin URI: https://github.com/alifallahrn/wp-dorna
+ * Description: A WooCommerce integration plugin for the Dorna platform. It keeps product prices and stock in sync and sends orders to Dorna as invoices.
+ * Version: 1.5.0
+ * Author: Ali Fallah
+ * Author URI: https://dornaapp.ir
+ * License: GPL2
+ * Text Domain: wp-dorna
+ * Domain Path: /languages
+ * Requires at least: 5.3
+ * Requires PHP: 7.4
+ * Requires Plugins: woocommerce
+ */
+
 use YahnisElsts\PluginUpdateChecker\v5\PucFactory;
-/*
-Plugin Name: WP Dorna
-Plugin URI: https://github.com/alifallahrn/wp-dorna
-Description: A WooCommerce integration plugin for the Dorna platform. It allows you to sync your WooCommerce products with the Dorna platform effortlessly.
-Version: 1.4.1
-Author: Ali Fallah
-Author URI: https://dornaapp.ir
-License: GPL2
-*/
 
 // If this file is called directly, abort.
-
 if (! defined('WPINC')) {
     die;
 }
 
 require 'vendor/autoload.php';
 
-define('WP_DORNA_VERSION', '1.4.1');
+define('WP_DORNA_VERSION', '1.5.0');
+define('WP_DORNA_FILE', __FILE__);
 define('WP_DORNA_PLUGIN_DIR', plugin_dir_path(__FILE__));
 define('WP_DORNA_PLUGIN_URL', plugin_dir_url(__FILE__));
 define('WP_DORNA_API_URL', 'https://my.dornaapp.ir/api/v1/');
 define('WP_DORNA_OPTION_NAME', 'wp_dorna_settings');
 
-require_once WP_DORNA_PLUGIN_DIR . 'includes/class-wp-dorna.php';
-require_once WP_DORNA_PLUGIN_DIR . 'includes/class-wp-dorna-admin.php';
-require_once WP_DORNA_PLUGIN_DIR . 'includes/class-wp-dorna-api.php';
+spl_autoload_register(function ($class) {
+    $prefix = 'WPDorna\\';
 
-function wp_dorna_activate()
-{
-    // Set default options
-    $default_options = array(
-        'api_key' => '',
-    );
-    add_option(WP_DORNA_OPTION_NAME, $default_options);
-}
-register_activation_hook(__FILE__, 'wp_dorna_activate');
-
-function wp_dorna_deactivate()
-{
-    $product_timestamp = wp_next_scheduled('wp_dorna_update_products_event');
-    if ($product_timestamp) {
-        wp_unschedule_event($product_timestamp, 'wp_dorna_update_products_event');
+    if (strncmp($class, $prefix, strlen($prefix)) !== 0) {
+        return;
     }
 
-    $retry_timestamp = wp_next_scheduled('wp_dorna_retry_failed_orders_event');
-    if ($retry_timestamp) {
-        wp_unschedule_event($retry_timestamp, 'wp_dorna_retry_failed_orders_event');
-    }
-}
-register_deactivation_hook(__FILE__, 'wp_dorna_deactivate');
+    $file = WP_DORNA_PLUGIN_DIR . 'src/' . str_replace('\\', '/', substr($class, strlen($prefix))) . '.php';
 
-function wp_dorna_init()
-{
-    $wp_dorna = new WP_Dorna();
-    $wp_dorna->init();
-
-    if (is_admin()) {
-        $wp_dorna_admin = new WP_Dorna_Admin();
-        $wp_dorna_admin->init();
+    if (is_readable($file)) {
+        require $file;
     }
-}
-add_action('plugins_loaded', 'wp_dorna_init');
+});
+
+register_activation_hook(__FILE__, array('WPDorna\Core\Lifecycle', 'activate'));
+register_deactivation_hook(__FILE__, array('WPDorna\Core\Lifecycle', 'deactivate'));
+
+add_action('init', function () {
+    load_plugin_textdomain('wp-dorna', false, dirname(plugin_basename(__FILE__)) . '/languages');
+});
+
+add_action('plugins_loaded', array('WPDorna\Core\Plugin', 'boot'));
 
 add_action('before_woocommerce_init', function () {
     if (class_exists(\Automattic\WooCommerce\Utilities\FeaturesUtil::class)) {

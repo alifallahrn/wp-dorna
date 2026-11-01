@@ -1,0 +1,94 @@
+name: Release
+
+# Every push to main publishes a GitHub release for the version in wp-dorna.php:
+# the tag, the installable zip as a release asset and the list of changes.
+# To ship a new version, raise "Version:" and WP_DORNA_VERSION in wp-dorna.php
+# before the push reaches main. If that version already has a release, this run
+# does nothing (and says so).
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out (with every tag)
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Read the plugin version
+        id: version
+        run: echo "version=$(bin/read-version.sh)" >> "$GITHUB_OUTPUT"
+
+      - name: Decide whether this version still needs a release
+        id: gate
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          tag="v$VERSION"
+
+          if git rev-parse -q --verify "refs/tags/$tag" >/dev/null; then
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            echo "::notice title=No release::$tag already exists. Raise the version in wp-dorna.php to publish a new release."
+            exit 0
+          fi
+
+          previous="$(git tag --list 'v[0-9]*' --sort=-v:refname | head -n1 || true)"
+
+          if [ -n "$previous" ] && [ "$(printf '%s\n%s\n' "${previous#v}" "$VERSION" | sort -V | tail -n1)" != "$VERSION" ]; then
+            echo "::error title=Version went backwards::wp-dorna.php says $VERSION but the latest release is $previous."
+            exit 1
+          fi
+
+          echo "skip=false" >> "$GITHUB_OUTPUT"
+          echo "previous=$previous" >> "$GITHUB_OUTPUT"
+
+      - name: Set up PHP 7.4 (the oldest version the plugin supports)
+        if: steps.gate.outputs.skip != 'true'
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '7.4'
+          tools: composer:v2
+
+      - name: Lint every PHP file
+        if: steps.gate.outputs.skip != 'true'
+        run: find . -path ./vendor -prune -o -name '*.php' -print0 | xargs -0 -n1 php -l > /dev/null
+
+      - name: Unit tests
+        if: steps.gate.outputs.skip != 'true'
+        run: php tests/run.php
+
+      - name: Install production dependencies
+        if: steps.gate.outputs.skip != 'true'
+        run: composer install --no-dev --no-interaction --prefer-dist --optimize-autoloader
+
+      - name: Build the installable zip
+        if: steps.gate.outputs.skip != 'true'
+        run: bin/build-release.sh "${{ steps.version.outputs.version }}"
+
+      - name: Write the release notes
+        if: steps.gate.outputs.skip != 'true'
+        run: bin/release-notes.sh "${{ steps.version.outputs.version }}" "${{ steps.gate.outputs.previous }}" > dist/notes.md
+
+      - name: Publish the release
+        if: steps.gate.outputs.skip != 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          gh release create "v$VERSION" "dist/wp-dorna-$VERSION.zip" \
+            --target "$GITHUB_SHA" \
+            --title "v$VERSION" \
+            --notes-file dist/notes.md \
+            --latest
