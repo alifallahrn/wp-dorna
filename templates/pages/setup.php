@@ -69,6 +69,7 @@ $number = 0;
                         <?php if (!$done['connect']) : ?>
                             <p class="wpd-muted"><?php esc_html_e('اول به درنا وصل شوید.', 'wp-dorna'); ?></p>
                         <?php else : ?>
+                            <?php View::render('partials/sku-hint'); ?>
                             <p class="wpd-muted"><?php esc_html_e('همه‌ی کالاهای درنا را یک‌بار آرام بررسی می‌کند تا قیمت و موجودی سایت با درنا یکی شود. می‌توانید صفحه را ببندید.', 'wp-dorna'); ?></p>
                             <?php View::render('partials/full-sync-panel'); ?>
                         <?php endif; ?>

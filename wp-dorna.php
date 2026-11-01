@@ -3,7 +3,7 @@
  * Plugin Name: WP Dorna
  * Plugin URI: https://github.com/alifallahrn/wp-dorna
  * Description: A WooCommerce integration plugin for the Dorna platform. It keeps product prices and stock in sync and sends orders to Dorna as invoices.
- * Version: 1.5.0
+ * Version: 1.5.1
  * Author: Ali Fallah
  * Author URI: https://dornaapp.ir
  * License: GPL2
@@ -23,7 +23,7 @@ if (! defined('WPINC')) {
 
 require 'vendor/autoload.php';
 
-define('WP_DORNA_VERSION', '1.5.0');
+define('WP_DORNA_VERSION', '1.5.1');
 define('WP_DORNA_FILE', __FILE__);
 define('WP_DORNA_PLUGIN_DIR', plugin_dir_path(__FILE__));
 define('WP_DORNA_PLUGIN_URL', plugin_dir_url(__FILE__));

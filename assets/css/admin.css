@@ -215,6 +215,14 @@ body.wpd-screen { background: #F9FAFB; }
 .wpd .wpd-field > span { font-size: 12px; color: var(--muted); }
 .wpd .wpd-field select.wpd-input { min-width: 130px; }
 
+/* ───── hint box (setup: link products by code) ───── */
+.wpd .wpd-hint { margin: 10px 0 14px; padding: 14px 16px; border-radius: var(--radius-sm); background: var(--accent-soft); color: #1E3A8A; font-size: 13px; line-height: 1.9; }
+.wpd .wpd-hint strong { display: flex; align-items: center; gap: 6px; margin-bottom: 4px; font-size: 14px; }
+.wpd .wpd-hint .wpd-i { width: 18px; height: 18px; }
+.wpd .wpd-hint p { margin: 0 0 6px; }
+.wpd .wpd-hint ol { margin: 0 0 8px; padding-inline-start: 20px; list-style-type: persian; }
+.wpd .wpd-hint li { margin-bottom: 2px; }
+
 /* ───── small boxes on product / order screens ───── */
 .wpd.wpd-box { margin: 0; max-width: none; padding: 4px 0; font-size: 13px; }
 .wpd.wpd-box .wpd-btn { width: 100%; }
