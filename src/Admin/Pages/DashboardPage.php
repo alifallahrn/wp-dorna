@@ -4,14 +4,12 @@ namespace WPDorna\Admin\Pages;
 
 use WPDorna\Admin\View;
 use WPDorna\Core\Scheduler;
-use WPDorna\Orders\InvoiceState;
+use WPDorna\Orders\OrderStats;
 use WPDorna\Sync\FullSync;
 use WPDorna\Sync\Status;
 
 class DashboardPage extends Page
 {
-    const WINDOW = 30 * DAY_IN_SECONDS;
-
     public function slug()
     {
         return 'wp-dorna';
@@ -66,45 +64,53 @@ class DashboardPage extends Page
      */
     private function order_counts()
     {
-        $cached = get_transient('wp_dorna_order_counts');
-        if (is_array($cached)) {
-            return $cached;
-        }
+        $counts = OrderStats::counts();
 
-        $count = function ($compare) {
-            $result = wc_get_orders(array(
-                'status'       => array('processing', 'completed'),
-                'limit'        => 1,
-                'paginate'     => true,
-                'return'       => 'ids',
-                'date_created' => '>' . (time() - self::WINDOW),
-                'meta_key'     => InvoiceState::SENT,
-                'meta_compare' => $compare,
-            ));
-
-            return (int) $result->total;
-        };
-
-        $counts = array('sent' => $count('EXISTS'), 'unsent' => $count('NOT EXISTS'));
-        set_transient('wp_dorna_order_counts', $counts, MINUTE_IN_SECONDS);
-
-        return $counts;
+        return array('sent' => $counts['sent'], 'unsent' => $counts['unsent']);
     }
 
     private function callouts($has_key, array $status, array $full, array $orders)
     {
         $callouts = array();
 
+        $connection = $this->services->connection;
+        $wizard     = $this->services->wizard;
+
+        if (!$wizard->finished() && !$wizard->ready()) {
+            $callouts[] = array(
+                'tone'   => 'info',
+                'icon'   => 'check',
+                /* translators: %s: number of finished steps out of four */
+                'title'  => sprintf(__('راه‌اندازی را کامل کنید (%s از ۴ قدم)', 'wp-dorna'), \WPDorna\Admin\Format::num($wizard->done_count())),
+                'text'   => __('اتصال، سینک کامل و سینک شبانه را در چند دقیقه انجام دهید تا دیگر لازم نباشد به سایت سر بزنید.', 'wp-dorna'),
+                'action' => array(__('ادامه‌ی راه‌اندازی', 'wp-dorna'), $this->url_for('wp-dorna-setup')),
+            );
+
+            return $callouts;
+        }
+
         if (!$has_key) {
             $callouts[] = array(
                 'tone'   => 'bad',
                 'icon'   => 'alert',
                 'title'  => __('هنوز به درنا وصل نشده‌اید', 'wp-dorna'),
-                'text'   => __('توکن را از پنل درنا کپی کنید و در تنظیمات وارد کنید تا همگام‌سازی شروع شود.', 'wp-dorna'),
+                'text'   => __('«اتصال به درنا» را بزنید، وارد حساب درنا شوید و کسب‌وکار را تأیید کنید.', 'wp-dorna'),
                 'action' => array(__('رفتن به تنظیمات', 'wp-dorna'), $this->url_for('wp-dorna-settings')),
             );
 
             return $callouts;
+        }
+
+        if ($connection->needs_attention()) {
+            $callouts[] = array(
+                'tone'   => 'bad',
+                'icon'   => 'alert',
+                'title'  => $connection->status() === \WPDorna\Core\Connection::MISMATCH
+                    ? __('این سایت با توکن سایت دیگری وصل است', 'wp-dorna')
+                    : __('درنا توکن این سایت را قبول نمی‌کند', 'wp-dorna'),
+                'text'   => __('همگام‌سازی و ارسال فاکتورها متوقف است. اگر این سایت اصلی است، دوباره به درنا وصل شوید.', 'wp-dorna'),
+                'action' => array(__('اتصال دوباره', 'wp-dorna'), $this->url_for('wp-dorna-settings')),
+            );
         }
 
         if (!empty($status['last_error'])) {

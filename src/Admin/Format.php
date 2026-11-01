@@ -15,6 +15,15 @@ class Format
         ));
     }
 
+    /** Latin digits in a string to Persian ones (for text built by hand, e.g. a clock "03:00"). */
+    public static function digits($text)
+    {
+        return strtr((string) $text, array(
+            '0' => '۰', '1' => '۱', '2' => '۲', '3' => '۳', '4' => '۴',
+            '5' => '۵', '6' => '۶', '7' => '۷', '8' => '۸', '9' => '۹',
+        ));
+    }
+
     /**
      * "۳ دقیقه پیش" for an ISO time or a unix timestamp; "—" when empty.
      */

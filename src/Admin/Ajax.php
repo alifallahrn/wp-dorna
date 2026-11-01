@@ -21,7 +21,7 @@ class Ajax
 
     public function register()
     {
-        foreach (array('test_connection', 'full_sync', 'import_scan', 'import_list', 'import_product', 'sync_product', 'send_order', 'unsent_orders', 'clear_logs') as $action) {
+        foreach (array('test_connection', 'full_sync', 'import_scan', 'import_list', 'import_product', 'sync_product', 'send_order', 'unsent_orders', 'clear_logs', 'save_schedule', 'wizard_step', 'wizard_finish') as $action) {
             add_action('wp_ajax_wp_dorna_' . $action, array($this, $action));
         }
     }
@@ -152,6 +152,56 @@ class Ajax
         ));
 
         wp_send_json_success(array('ids' => array_map('intval', $ids)));
+    }
+
+    /**
+     * Nightly / weekly full sync: mode, hour, weekday. Saved as the plan for the next run.
+     */
+    public function save_schedule()
+    {
+        $this->guard();
+
+        $mode = $this->input('mode');
+
+        if (!in_array($mode, \WPDorna\Support\SchedulePlan::MODES, true)) {
+            wp_send_json_error(array('message' => __('نوع زمان‌بندی معتبر نیست.', 'wp-dorna')));
+        }
+
+        $this->services->scheduled->save(array(
+            'mode'    => $mode,
+            'hour'    => max(0, min(23, (int) $this->input('hour'))),
+            'weekday' => max(0, min(6, (int) $this->input('weekday'))),
+        ));
+        $this->services->wizard->mark('schedule');
+
+        $schedule = $this->services->settings->schedule();
+
+        wp_send_json_success(array(
+            'mode'     => $schedule['mode'],
+            'next_due' => $schedule['next_due'] ? Format::datetime($schedule['next_due']) : '',
+            'message'  => $mode === 'off'
+                ? __('سینک زمان‌بندی‌شده خاموش شد.', 'wp-dorna')
+                : __('ذخیره شد.', 'wp-dorna'),
+        ));
+    }
+
+    /** "Later" on an optional first-run step. */
+    public function wizard_step()
+    {
+        $this->guard();
+
+        $this->services->wizard->mark($this->input('step'));
+
+        wp_send_json_success();
+    }
+
+    public function wizard_finish()
+    {
+        $this->guard();
+
+        $this->services->wizard->finish();
+
+        wp_send_json_success(array('url' => admin_url('admin.php?page=wp-dorna')));
     }
 
     public function clear_logs()

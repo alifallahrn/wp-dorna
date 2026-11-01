@@ -8,6 +8,7 @@ use WPDorna\Admin\Pages\LogsPage;
 use WPDorna\Admin\Pages\OrdersPage;
 use WPDorna\Admin\Pages\Page;
 use WPDorna\Admin\Pages\SettingsPage;
+use WPDorna\Admin\Pages\SetupPage;
 use WPDorna\Admin\Pages\SyncPage;
 use WPDorna\Core\Services;
 
@@ -19,13 +20,16 @@ class Admin
     private $pages;
 
     private $settings_page;
+    private $setup_page;
 
     public function __construct(Services $services)
     {
         $this->services      = $services;
         $this->settings_page = new SettingsPage($services);
+        $this->setup_page    = new SetupPage($services);
         $this->pages         = array(
             new DashboardPage($services),
+            $this->setup_page,
             new SyncPage($services),
             new ImportPage($services),
             new OrdersPage($services),
@@ -40,6 +44,8 @@ class Admin
         add_filter('admin_body_class', array($this, 'body_class'));
 
         $this->settings_page->register();
+        $this->setup_page->register();
+        (new ConnectionNotices($this->services, $this))->register();
 
         (new Assets($this->services, $this))->register();
         (new Ajax($this->services))->register();
@@ -60,6 +66,11 @@ class Admin
         );
 
         foreach ($this->pages as $page) {
+            // A finished checklist leaves the menu, but its URL keeps working ("run the setup again").
+            if (!$page->visible() && !$this->is_current($page)) {
+                continue;
+            }
+
             add_submenu_page(
                 $this->pages[0]->slug(),
                 $page->title(),
@@ -75,8 +86,8 @@ class Admin
 
     private function render(Page $page)
     {
-        $pages = array_filter($this->pages, function (Page $item) {
-            return current_user_can($item->capability());
+        $pages = array_filter($this->pages, function (Page $item) use ($page) {
+            return current_user_can($item->capability()) && ($item->visible() || $item === $page);
         });
 
         View::render('layout', array(
@@ -88,12 +99,17 @@ class Admin
         ));
     }
 
+    private function is_current(Page $page)
+    {
+        $current = isset($_GET['page']) ? sanitize_key(wp_unslash($_GET['page'])) : ''; // phpcs:ignore WordPress.Security.NonceVerification
+
+        return $page->slug() === $current;
+    }
+
     public function is_plugin_screen()
     {
-        $page = isset($_GET['page']) ? sanitize_key(wp_unslash($_GET['page'])) : ''; // phpcs:ignore WordPress.Security.NonceVerification
-
         foreach ($this->pages as $item) {
-            if ($item->slug() === $page) {
+            if ($this->is_current($item)) {
                 return true;
             }
         }

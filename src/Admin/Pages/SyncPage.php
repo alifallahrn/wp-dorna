@@ -35,7 +35,8 @@ class SyncPage extends Page
     public function render()
     {
         View::render('pages/sync', array(
-            'status' => Status::get(),
+            'status'   => Status::get(),
+            'schedule' => $this->services->settings->schedule(),
         ));
     }
 }

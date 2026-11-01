@@ -2,10 +2,12 @@
 
 namespace WPDorna\Core;
 
+use WPDorna\Connect\Heartbeat;
 use WPDorna\Orders\RetryService;
 use WPDorna\Support\Logger;
 use WPDorna\Sync\FullSync;
 use WPDorna\Sync\IncrementalSync;
+use WPDorna\Sync\ScheduledFullSync;
 
 /**
  * Cron schedules and events. The hook names are the ones earlier versions used, so
@@ -16,15 +18,21 @@ class Scheduler
     const PRODUCTS_HOOK  = 'wp_dorna_update_products_event';
     const RETRY_HOOK     = 'wp_dorna_retry_failed_orders_event';
     const LOG_PURGE_HOOK = 'wp_dorna_purge_logs_event';
+    const HEARTBEAT_HOOK = 'wp_dorna_heartbeat_event';
+    const SCHEDULED_FULL_SYNC_HOOK = 'wp_dorna_scheduled_full_sync_event';
 
     private $incremental;
     private $retry;
+    private $heartbeat;
+    private $scheduled;
     private $logger;
 
-    public function __construct(IncrementalSync $incremental, RetryService $retry, Logger $logger)
+    public function __construct(IncrementalSync $incremental, RetryService $retry, Heartbeat $heartbeat, ScheduledFullSync $scheduled, Logger $logger)
     {
         $this->incremental = $incremental;
         $this->retry       = $retry;
+        $this->heartbeat   = $heartbeat;
+        $this->scheduled   = $scheduled;
         $this->logger      = $logger;
     }
 
@@ -35,10 +43,14 @@ class Scheduler
         add_action(self::PRODUCTS_HOOK, array($this->incremental, 'run'));
         add_action(self::RETRY_HOOK, array($this->retry, 'run'));
         add_action(self::LOG_PURGE_HOOK, array($this->logger, 'purge_old'));
+        add_action(self::HEARTBEAT_HOOK, array($this->heartbeat, 'send'));
+        add_action(self::SCHEDULED_FULL_SYNC_HOOK, array($this->scheduled, 'run'));
 
         $this->ensure(self::PRODUCTS_HOOK, 'every_minute');
         $this->ensure(self::RETRY_HOOK, 'every_five_minutes');
         $this->ensure(self::LOG_PURGE_HOOK, 'daily');
+        $this->ensure(self::HEARTBEAT_HOOK, 'every_five_minutes');
+        $this->ensure(self::SCHEDULED_FULL_SYNC_HOOK, 'every_five_minutes');
     }
 
     public function add_schedules($schedules)
@@ -64,7 +76,7 @@ class Scheduler
 
     public static function clear_all()
     {
-        foreach (array(self::PRODUCTS_HOOK, self::RETRY_HOOK, self::LOG_PURGE_HOOK, FullSync::CRON_HOOK) as $hook) {
+        foreach (array(self::PRODUCTS_HOOK, self::RETRY_HOOK, self::LOG_PURGE_HOOK, self::HEARTBEAT_HOOK, self::SCHEDULED_FULL_SYNC_HOOK, FullSync::CRON_HOOK) as $hook) {
             wp_clear_scheduled_hook($hook);
         }
     }

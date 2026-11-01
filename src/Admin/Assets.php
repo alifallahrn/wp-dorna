@@ -62,6 +62,7 @@ class Assets
                 'syncing'      => __('در حال بروزرسانی…', 'wp-dorna'),
                 'sync'         => __('بروزرسانی از درنا', 'wp-dorna'),
                 'copied'       => __('کپی شد', 'wp-dorna'),
+                'confirmDisconnect' => __('اتصال به درنا قطع شود؟ تا وصل کردن دوباره، قیمت و موجودی بروزرسانی نمی‌شود و فاکتور سفارش‌ها ثبت نمی‌شود.', 'wp-dorna'),
                 'states'       => array(
                     'idle'      => __('آماده‌ی شروع', 'wp-dorna'),
                     'running'   => __('در حال اجرا', 'wp-dorna'),

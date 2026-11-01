@@ -23,6 +23,8 @@ function wp_dorna_uninstall_site()
         'wp_dorna_full_sync',
         'wp_dorna_full_sync_seen',
         'wp_dorna_full_sync_report',
+        'wp_dorna_connection',
+        'wp_dorna_wizard',
         'wp_dorna_lock_products',
         'wp_dorna_lock_retry',
         'wp_dorna_lock_full_sync',
@@ -31,6 +33,7 @@ function wp_dorna_uninstall_site()
     }
 
     delete_transient('wp_dorna_order_counts');
+    delete_transient('wp_dorna_order_stats');
 
     $uploads = wp_upload_dir(null, false);
     $dir     = trailingslashit($uploads['basedir']) . 'wp-dorna-logs/';

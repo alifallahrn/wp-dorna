@@ -31,6 +31,12 @@ abstract class Page
         return 'manage_woocommerce';
     }
 
+    /** Whether the screen appears in the navigation (it stays reachable by URL either way). */
+    public function visible()
+    {
+        return true;
+    }
+
     public function url(array $args = array())
     {
         return add_query_arg(array_merge(array('page' => $this->slug()), $args), admin_url('admin.php'));

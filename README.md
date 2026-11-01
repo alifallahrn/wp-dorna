@@ -10,6 +10,9 @@ A powerful WordPress plugin that seamlessly integrates WooCommerce with the Dorn
 ## 🚀 Features
 
 - **Automatic product sync**: price, discount and stock are pulled from Dorna every minute. A failed request never loses changes: the sync resumes from the last *successful* run.
+- **Connect with one button**: sign in to Dorna, pick the business, confirm; the token is issued for this site only (a copy of the site cannot use it) and the connection shows on your Dorna dashboard with alerts.
+- **Scheduled full sync**: run the full sync every night or week at the hour you pick.
+- **First-run checklist**: connect, first full sync, import, nightly schedule.
 - **Full sync with progress**: one slow, paced pass over all Dorna products (one request every few seconds, pausable and resumable) to make sure the store matches Dorna.
 - **Invoices**: orders are sent to Dorna when they become *processing* or *completed*; failures are retried with growing pauses and shown with their reason.
 - **Bulk import**: bring Dorna products that the store lacks in as drafts.
@@ -48,9 +51,8 @@ A powerful WordPress plugin that seamlessly integrates WooCommerce with the Dorn
 ### Initial Setup
 
 1. After activation, open the **درنا** menu in your WordPress admin and go to **تنظیمات**
-2. Paste your Dorna token (or define `WP_DORNA_API_KEY` in `wp-config.php`)
-3. Save, then press **آزمایش اتصال**
-4. Run **سینک کامل** once so the whole catalog is matched
+2. Press **اتصال به درنا**, sign in, choose the business and confirm (or paste a token / define `WP_DORNA_API_KEY` in `wp-config.php` under the advanced section)
+3. Follow the **راه‌اندازی** checklist: first full sync, optional import, nightly sync
 
 ## 📖 Usage
 

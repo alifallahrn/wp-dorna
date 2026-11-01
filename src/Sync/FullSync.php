@@ -65,6 +65,7 @@ class FullSync
         return array(
             'status'             => 'idle', // idle | running | paused | completed | cancelled | failed
             'run_id'             => '',
+            'trigger'            => 'manual', // manual | scheduled
             'started_at'         => null,
             'finished_at'        => null,
             'server_time'        => null,
@@ -122,7 +123,7 @@ class FullSync
     /**
      * @return array|WP_Error
      */
-    public function start()
+    public function start($trigger = 'manual')
     {
         $state = self::get_state();
 
@@ -137,6 +138,7 @@ class FullSync
         $state = array_merge(self::defaults(), array(
             'status'     => 'running',
             'run_id'     => wp_generate_password(8, false),
+            'trigger'    => $trigger === 'scheduled' ? 'scheduled' : 'manual',
             'started_at' => Time::now_iso(),
         ));
 

@@ -187,6 +187,34 @@ body.wpd-screen { background: #F9FAFB; }
 .wpd .wpd-log__line.is-warn .wpd-log__meta { color: var(--warn); }
 .wpd .wpd-log__line.is-mut .wpd-log__meta { color: var(--muted); }
 
+/* ───── connection card, details row ───── */
+.wpd .wpd-conn__head { display: flex; align-items: flex-start; gap: 14px; flex-wrap: wrap; }
+.wpd .wpd-conn__text { flex: 1 1 280px; min-width: 0; }
+.wpd .wpd-conn__text .wpd-card__title { margin-bottom: 4px; }
+.wpd .wpd-conn .wpd-actions form { margin: 0; }
+.wpd .wpd-row-details { border-bottom: 1px solid var(--line); }
+.wpd .wpd-row-details__summary { padding: 14px 20px; font-weight: 600; cursor: pointer; color: var(--muted); }
+.wpd .wpd-row-details[open] .wpd-row-details__summary { color: var(--ink); }
+.wpd .wpd-row-details .wpd-row { border-top: 1px solid var(--line); }
+.wpd .wpd-row-details + .wpd-row { border-top: 0; }
+
+/* ───── first-run checklist and schedule form ───── */
+.wpd .wpd-steps { margin: 0; padding: 0; list-style: none; }
+.wpd .wpd-step { display: flex; gap: 14px; padding: 20px; }
+.wpd .wpd-step + .wpd-step { border-top: 1px solid var(--line); }
+.wpd .wpd-step__num { flex: none; width: 32px; height: 32px; border-radius: 50%; display: grid; place-items: center; background: var(--fill); color: var(--muted); font-weight: 700; font-size: 13px; }
+.wpd .wpd-step__num .wpd-i { width: 18px; height: 18px; }
+.wpd .wpd-step.is-done .wpd-step__num { background: var(--good-soft); color: var(--good); }
+.wpd .wpd-step__body { flex: 1; min-width: 0; }
+.wpd .wpd-step__title { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; font-size: 15px; font-weight: 700; margin-bottom: 4px; }
+.wpd .wpd-step__body .wpd-card { margin-top: 12px; margin-bottom: 0; }
+.wpd .wpd-toolbar--end { justify-content: flex-end; border-top: 1px solid var(--line); border-bottom: 0; }
+
+.wpd .wpd-schedule { display: flex; align-items: flex-end; gap: 12px; flex-wrap: wrap; margin: 12px 0 0; }
+.wpd .wpd-field { display: grid; gap: 4px; }
+.wpd .wpd-field > span { font-size: 12px; color: var(--muted); }
+.wpd .wpd-field select.wpd-input { min-width: 130px; }
+
 /* ───── small boxes on product / order screens ───── */
 .wpd.wpd-box { margin: 0; max-width: none; padding: 4px 0; font-size: 13px; }
 .wpd.wpd-box .wpd-btn { width: 100%; }

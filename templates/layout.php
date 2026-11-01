@@ -34,6 +34,14 @@ defined('ABSPATH') || exit;
         </nav>
     </header>
 
+    <?php $flash = \WPDorna\Support\Flash::pull(); ?>
+    <?php if ($flash) : ?>
+        <div class="wpd-callout" role="status">
+            <span class="wpd-ic is-<?php echo esc_attr(in_array($flash['tone'], array('good', 'bad', 'warn'), true) ? $flash['tone'] : ''); ?>"><?php echo Icons::svg($flash['tone'] === 'bad' ? 'alert' : ($flash['tone'] === 'good' ? 'check' : 'link')); // phpcs:ignore WordPress.Security.EscapeOutput ?></span>
+            <div class="wpd-callout__text"><strong><?php echo esc_html($flash['text']); ?></strong></div>
+        </div>
+    <?php endif; ?>
+
     <main class="wpd-main">
         <?php call_user_func($content); ?>
     </main>

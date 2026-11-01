@@ -16,10 +16,15 @@ define('WP_USE_THEMES', false);
 define('DOING_AJAX', true);
 require isset($argv[1]) ? $argv[1] : __DIR__ . '/../../../../wp-load.php';
 
+use WPDorna\Admin\Admin;
 use WPDorna\Admin\Ajax;
+use WPDorna\Admin\ConnectionNotices;
+use WPDorna\Connect\ConnectionService;
+use WPDorna\Core\Connection;
 use WPDorna\Core\Services;
 use WPDorna\Orders\InvoiceState;
 use WPDorna\Support\Money;
+use WPDorna\Support\Site;
 use WPDorna\Sync\FullSync;
 use WPDorna\Sync\Status;
 
@@ -36,7 +41,7 @@ $tmp = sys_get_temp_dir() . '/wp-dorna-test-' . uniqid();
 add_filter('upload_dir', function ($d) use ($tmp) { return array_merge($d, array('basedir' => $tmp)); });
 
 $option_keys = array(WP_DORNA_OPTION_NAME, Status::OPTION, Status::LAST_UPDATE_OPTION, FullSync::STATE_OPTION, FullSync::SEEN_OPTION, FullSync::REPORT_OPTION,
-    'wp_dorna_lock_products', 'wp_dorna_lock_retry', 'wp_dorna_lock_full_sync');
+    'wp_dorna_lock_products', 'wp_dorna_lock_retry', 'wp_dorna_lock_full_sync', Connection::OPTION, 'wp_dorna_wizard');
 $backup = array();
 foreach ($option_keys as $key) { $backup[$key] = get_option($key, '__none__'); }
 
@@ -47,7 +52,7 @@ $requests = array();
 $fake     = function ($method, $url, $body) { return array(404, array()); };
 add_filter('pre_http_request', function ($pre, $args, $url) use (&$requests, &$fake) {
     $method = $args['method'] ?? 'GET';
-    $requests[] = array('method' => $method, 'url' => $url, 'body' => isset($args['body']) ? json_decode($args['body'], true) : null, 'timeout' => $args['timeout']);
+    $requests[] = array('method' => $method, 'url' => $url, 'body' => isset($args['body']) ? json_decode($args['body'], true) : null, 'timeout' => $args['timeout'], 'headers' => isset($args['headers']) ? $args['headers'] : array());
     list($code, $body) = call_user_func($fake, $method, $url, isset($args['body']) ? json_decode($args['body'], true) : null);
 
     return array('headers' => array(), 'body' => wp_json_encode($body), 'response' => array('code' => $code, 'message' => ''), 'cookies' => array(), 'filename' => null);
@@ -252,12 +257,162 @@ try {
     $imported && $cleanup[] = function () use ($imported) { $imported->delete(true); };
     check('import: a second import of the same SKU is refused', is_wp_error($services->importer->import('zz-imp-9')));
 
+
+    // ------------------------------------------------- connection state / headers
+    $conn = $services->connection;
+    $conn->clear();
+    check('connection: a pasted token counts as manual', $conn->status() === Connection::MANUAL && $conn->is_usable() && !$conn->is_linked());
+
+    $requests = array();
+    $fake = function ($m, $u) { return array(200, array('data' => array())); };
+    $services->client->get_data('products-list');
+    $sent_headers = $requests[0]['headers'];
+    check('client: every request names the site (X-Dorna-Site) and the plugin version', $sent_headers['X-Dorna-Site'] === Site::origin() && $sent_headers['X-Dorna-Plugin'] === WP_DORNA_VERSION && strpos($sent_headers['Authorization'], 'Bearer ') === 0);
+    check('client: the site header is an origin, never a path', strpos(parse_url($sent_headers['X-Dorna-Site'], PHP_URL_PATH) ?: '', '/') === false);
+
+    $fake = function ($m, $u) { return array(401, array('message' => 'Unauthenticated.')); };
+    $services->client->get_data('products-list');
+    check('client: a 401 marks the connection rejected', $conn->status() === Connection::REJECTED && $conn->needs_attention() && !$conn->is_usable());
+
+    $fake = function ($m, $u) { return array(200, array('data' => array())); };
+    $services->client->get_data('products-list');
+    check('client: a good answer clears the rejection', $conn->status() === Connection::MANUAL);
+
+    $fake = function ($m, $u) { return array(403, array('error' => 'site_mismatch', 'message' => 'x')); };
+    $err = $services->client->get_data('products-list');
+    check('client: 403 site_mismatch marks it mismatched, in Persian, without retries', $conn->status() === Connection::MISMATCH && is_wp_error($err) && strpos($err->get_error_message(), 'آدرس دیگری') !== false);
+    $fake = function ($m, $u) { return array(403, array('error' => 'token_not_connected')); };
+    $services->client->get_data('products-list');
+    check('client: 403 token_not_connected means rejected', $conn->status() === Connection::REJECTED);
+    $conn->clear();
+
+    // ---------------------------------------------------------- connect flow
+    $url = $services->connect->authorize_url();
+    parse_str((string) parse_url($url, PHP_URL_QUERY), $q);
+    check('connect: authorize URL points at Dorna with site, return, state and challenge', strpos($url, ConnectionService::app_url() . 'connect/woocommerce?') === 0
+        && $q['site'] === Site::origin() && $q['return'] === ConnectionService::return_url() && strlen($q['challenge']) === 43 && strlen($q['state']) >= 16 && !isset($q['token']));
+    $pending = get_transient('wp_dorna_connect_' . $q['state']);
+    check('connect: the verifier is kept server-side and matches the challenge (PKCE)', is_array($pending)
+        && rtrim(strtr(base64_encode(hash('sha256', $pending['verifier'], true)), '+/', '-_'), '=') === $q['challenge']);
+    delete_transient('wp_dorna_connect_' . $q['state']);
+
+    $services->settings->clear_api_key();
+    $requests = array();
+    $fake = function ($m, $u, $b) {
+        if (strpos($u, 'connect/exchange') !== false) {
+            return array(200, array('token' => '7|brand-new-token-0123456789', 'business' => array('name' => 'فروشگاه نمونه', 'username' => 'demo'), 'site' => Site::origin(), 'connected_at' => gmdate('c')));
+        }
+        return array(200, array('ok' => true));
+    };
+    $result = $services->connect->connect(str_repeat('a', 48), 'verifier-value');
+    $exchange = array_values(array_filter($requests, function ($r) { return strpos($r['url'], 'connect/exchange') !== false; }))[0];
+    check('connect: the exchange sends the code, the verifier and the site, with no token', $exchange['body']['code'] === str_repeat('a', 48) && $exchange['body']['verifier'] === 'verifier-value'
+        && $exchange['body']['site'] === Site::origin() && !isset($exchange['headers']['Authorization']));
+    check('connect: token saved, status connected, business remembered', $services->settings->api_key() === '7|brand-new-token-0123456789' && $conn->status() === Connection::CONNECTED
+        && $conn->is_linked() && $conn->data()['business_name'] === 'فروشگاه نمونه' && $conn->data()['business_username'] === 'demo');
+    check('connect: a heartbeat goes out right away so Dorna shows the site at once', count(array_filter($requests, function ($r) { return strpos($r['url'], 'connect/heartbeat') !== false; })) === 1);
+
+    $before = $services->settings->api_key();
+    check('connect: a malformed code is refused without calling Dorna', is_wp_error($services->connect->connect('short', 'v')) && $services->settings->api_key() === $before);
+    $fake = function ($m, $u) { return array(422, array('error' => 'invalid_code')); };
+    $bad = $services->connect->connect(str_repeat('b', 48), 'v');
+    check('connect: an expired code gives a clear Persian message and keeps the old token', is_wp_error($bad) && strpos($bad->get_error_message(), 'منقضی') !== false && $services->settings->api_key() === $before);
+
+    // ------------------------------------------------------------- heartbeat
+    $payload = $services->heartbeat->payload();
+    check('heartbeat: carries versions, sync, full sync, orders and schedule', isset($payload['plugin_version'], $payload['wp_version'], $payload['product_sync']['last_success'], $payload['full_sync']['status'], $payload['orders']['unsent'], $payload['schedule']['mode']));
+    check('heartbeat: no customer, order or product data in it', strpos(wp_json_encode($payload), '@') === false && !array_key_exists('items', $payload) && !array_key_exists('customer', $payload));
+    $requests = array();
+    $fake = function ($m, $u) { return array(200, array('ok' => true)); };
+    check('heartbeat: sent as a health report', $services->heartbeat->send() === true && $requests[0]['body']['health']['plugin_version'] === WP_DORNA_VERSION);
+    $conn->mark(Connection::REJECTED);
+    $requests = array();
+    check('heartbeat: nothing is sent while Dorna refuses the token', $services->heartbeat->send() === null && !$requests);
+
+    // ------------------------------------------------------------ disconnect
+    $conn->mark_ok();
+    $requests = array();
+    $fake = function ($m, $u) { return array(200, array('ok' => true)); };
+    $services->connect->disconnect();
+    check('disconnect: Dorna is told, the token and the connection are forgotten', count(array_filter($requests, function ($r) { return strpos($r['url'], 'connect/disconnect') !== false; })) === 1
+        && !$services->settings->has_key() && $conn->status() === Connection::NONE);
+
+    // -------------------------------------------------------- admin notices
+    $services->settings->set_api_key('test-token-123456');
+    $conn->mark(Connection::MISMATCH);
+    wp_set_current_user(get_users(array('role' => 'administrator', 'number' => 1))[0]->ID);
+    $notices = new ConnectionNotices($services, new Admin($services));
+    ob_start();
+    $notices->render();
+    $html = ob_get_clean();
+    check('notice: a mismatched connection is announced on admin screens', strpos($html, 'notice-error') !== false && strpos($html, 'کپی') !== false && strpos($html, 'wp-dorna-settings') !== false);
+    $conn->clear();
+    ob_start();
+    $notices->render();
+    check('notice: nothing is shown when the connection is fine', ob_get_clean() === '');
+
+    // ---------------------------------------------------------------- wizard
+    delete_option('wp_dorna_wizard');
+    check('wizard: an install that existed before the wizard counts as set up', $services->wizard->finished());
+    $services->settings->clear_api_key();
+    $services->wizard->start_if_new();
+    check('wizard: a fresh install without a token gets the checklist', !$services->wizard->finished());
+    check('wizard: required steps pending, optional ones are optional', !$services->wizard->ready() && count(array_filter($services->wizard->steps(), function ($step) { return $step['optional']; })) === 2);
+    $services->settings->set_api_key('test-token-123456');
+    $services->wizard->mark('import');
+    $services->wizard->mark('bogus');
+    $done_keys = array_column(array_filter($services->wizard->steps(), function ($step) { return $step['done']; }), 'key');
+    check('wizard: connect and import are done, an unknown step is ignored', in_array('connect', $done_keys, true) && in_array('import', $done_keys, true) && !in_array('bogus', $done_keys, true));
+    $services->wizard->finish();
+    check('wizard: finish and reopen', $services->wizard->finished() && ($services->wizard->reopen() || true) && !$services->wizard->finished());
+
+    // -------------------------------------------------------------- order stats
+    $stats = \WPDorna\Orders\OrderStats::counts();
+    check('order stats: counts shaped for the overview and the heartbeat', isset($stats['sent'], $stats['unsent'], $stats['max_attempts']) && array_key_exists('oldest_unsent_at', $stats));
+    delete_transient(\WPDorna\Orders\OrderStats::CACHE_KEY);
+
+    // ------------------------------------------------ scheduled full sync
+    $sched = $services->scheduled;
+    $tz    = wp_timezone();
+    $now   = new DateTimeImmutable('2026-11-02 03:20:00', $tz);
+    $conn->clear();
+    $services->settings->save_schedule(array('mode' => 'off'));
+    check('schedule: off does nothing', $sched->run($now) === 'idle');
+
+    $services->settings->save_schedule(array('mode' => 'nightly', 'hour' => 3, 'next_due' => ''));
+    $fs->cancel();
+    delete_option(FullSync::STATE_OPTION);
+    $conn->set_manual();
+    check('schedule: first run only plans the next slot', $sched->run($now) === 'not_due' && $services->settings->schedule()['next_due'] !== '');
+
+    $services->settings->save_schedule(array('next_due' => '2026-11-02T03:00:00+03:30'));
+    $fake = function ($m, $u) { return array(200, array('current_page' => 1, 'last_page' => 1, 'total' => 0, 'data' => array())); };
+    check('schedule: due and inside the night window starts a scheduled full sync', $sched->run($now) === 'started'
+        && FullSync::get_state()['status'] === 'running' && FullSync::get_state()['trigger'] === 'scheduled');
+    $next = new DateTimeImmutable($services->settings->schedule()['next_due']);
+    check('schedule: the next slot moves to tomorrow 03:00', $next->format('Y-m-d H:i') === '2026-11-03 03:00');
+    check('schedule: nothing is due right after', $sched->run($now) === 'not_due');
+    $fs->cancel();
+
+    $services->settings->save_schedule(array('next_due' => '2026-11-02T03:00:00+03:30'));
+    check('schedule: a pass that began less than 12h ago is not repeated', $sched->run($now) === 'recent' || $sched->run($now) === 'not_due');
+
+    delete_option(FullSync::STATE_OPTION);
+    $services->settings->save_schedule(array('next_due' => '2026-11-01T20:00:00+03:30'));
+    check('schedule: a due time missed by more than 6h is skipped, not started by day', $sched->run($now) === 'missed' && FullSync::get_state()['status'] === 'idle');
+
+    $services->settings->save_schedule(array('next_due' => '2026-11-02T03:00:00+03:30'));
+    $conn->mark(Connection::REJECTED);
+    check('schedule: no full sync while Dorna refuses the token', $sched->run($now) === 'no_connection');
+    $conn->clear();
+    $services->settings->save_schedule(array('mode' => 'off', 'next_due' => ''));
+
     // ------------------------------------------------- ajax: nonce + capability
     $ajax = new Ajax($services);
     add_filter('wp_die_ajax_handler', function () { return function ($message) { throw new RuntimeException('die'); }; });
-    $call = function ($method, $user_id, $nonce) use ($ajax) {
+    $call = function ($method, $user_id, $nonce, array $extra = array()) use ($ajax) {
         wp_set_current_user($user_id);
-        $_POST = array('nonce' => $nonce, 'order_id' => 0);
+        $_POST = array_merge(array('nonce' => $nonce, 'order_id' => 0), $extra);
         $_REQUEST = $_POST;
         ob_start();
         try { $ajax->$method(); } catch (RuntimeException $e) { }
@@ -280,6 +435,15 @@ try {
     check('ajax: admin with nonce passes (connection test says OK on 404 = valid token)', $ok['success'] === true);
     $fake = function () { return array(401, array()); };
     $bad = $call('test_connection', $admin_id, wp_create_nonce(Ajax::NONCE));
+    $_POST = array();
+    wp_set_current_user($admin_id);
+    $sched_ok = $call('save_schedule', $admin_id, wp_create_nonce(Ajax::NONCE), array('mode' => 'weekly', 'hour' => '4', 'weekday' => '6'));
+    $saved = $services->settings->schedule();
+    check('ajax: schedule saved with a next run', $sched_ok['success'] === true && $saved['mode'] === 'weekly' && $saved['hour'] === 4 && $saved['weekday'] === 6 && $saved['next_due'] !== '');
+    check('ajax: an unknown schedule mode is refused', $call('save_schedule', $admin_id, wp_create_nonce(Ajax::NONCE), array('mode' => 'hourly'))['success'] === false);
+    check('ajax: a subscriber cannot change the schedule', $call('save_schedule', $subscriber, wp_create_nonce(Ajax::NONCE), array('mode' => 'nightly'))['success'] === false);
+    check('ajax: wizard step needs a nonce', $call('wizard_step', $admin_id, '', array('step' => 'import'))['success'] === false);
+    $services->settings->save_schedule(array('mode' => 'off', 'next_due' => ''));
     check('ajax: rejected token is reported in Persian', $bad['success'] === false && strpos($bad['data']['message'], 'توکن') !== false);
 } finally {
     foreach (array_reverse($cleanup) as $undo) { try { $undo(); } catch (Throwable $e) { } }

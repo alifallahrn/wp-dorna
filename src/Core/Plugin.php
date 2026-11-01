@@ -20,10 +20,11 @@ class Plugin
 
         $services = new Services();
 
-        $scheduler = new Scheduler($services->incremental, $services->retry, $services->logger);
+        $scheduler = new Scheduler($services->incremental, $services->retry, $services->heartbeat, $services->scheduled, $services->logger);
         $scheduler->register();
 
         $services->full_sync->register();
+        $services->connect->register();
         $services->invoices->register();
 
         if (is_admin()) {

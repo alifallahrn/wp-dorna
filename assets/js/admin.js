@@ -455,7 +455,66 @@
         }
     }
 
+    /* ───────────── schedule, first-run checklist, confirmations ───────────── */
+    function schedule() {
+        $all('[data-schedule-form]').forEach(function (form) {
+            var mode = $('[data-schedule="mode"]', form);
+            var wrap = form.closest('.wpd-card') || form.parentNode;
+
+            function toggle() {
+                $('[data-schedule="weekday"]', form).hidden = mode.value !== 'weekly';
+                $('[data-schedule="hour"]', form).hidden = mode.value === 'off';
+            }
+
+            mode.addEventListener('change', toggle);
+            toggle();
+
+            form.addEventListener('submit', function (event) {
+                event.preventDefault();
+                var button = $('button[type="submit"]', form);
+                var note = $('[data-schedule="message"]', wrap);
+                var data = {};
+                $all('select', form).forEach(function (select) { data[select.name] = select.value; });
+
+                button.disabled = true;
+                post('save_schedule', data).then(function (result) {
+                    if (!result.ok) {
+                        say(note, result.data.message, 'bad');
+                        return;
+                    }
+                    var text = result.data.mode === 'off' ? result.data.message : result.data.message + (result.data.next_due ? ' — اجرای بعدی: ' + result.data.next_due : '');
+                    say(note, text, 'good');
+                }).catch(function (error) {
+                    say(note, error.message, 'bad');
+                }).then(function () { button.disabled = false; });
+            });
+        });
+
+        $all('[data-wizard-step]').forEach(function (button) {
+            button.addEventListener('click', function () {
+                post('wizard_step', { step: button.getAttribute('data-wizard-step') }).then(function () { window.location.reload(); });
+            });
+        });
+
+        $all('[data-wizard-finish]').forEach(function (button) {
+            button.addEventListener('click', function () {
+                post('wizard_finish').then(function (result) {
+                    window.location.href = result.data.url || window.location.href;
+                });
+            });
+        });
+
+        $all('form[data-confirm="disconnect"]').forEach(function (form) {
+            form.addEventListener('submit', function (event) {
+                if (!window.confirm(t.confirmDisconnect)) {
+                    event.preventDefault();
+                }
+            });
+        });
+    }
+
     document.addEventListener('DOMContentLoaded', function () {
+        schedule();
         fullSync();
         importer();
         orders();
