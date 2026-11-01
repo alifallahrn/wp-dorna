@@ -2,8 +2,12 @@
 
 class WP_Dorna_Admin
 {
-    public function init()
+    private $full_sync;
+
+    public function init(WP_Dorna_Full_Sync $full_sync)
     {
+        $this->full_sync = $full_sync;
+
         add_action('admin_init', array($this, 'register_settings'));
         add_action('admin_menu', array($this, 'add_settings_page'));
 
@@ -501,6 +505,7 @@ class WP_Dorna_Admin
                 <div class="wp-dorna-sidebar">
                     <div class="wp-dorna-tab active" data-tab="settings">تنظیمات</div>
                     <div class="wp-dorna-tab" data-tab="import">وارد کردن محصولات</div>
+                    <div class="wp-dorna-tab" data-tab="full-sync">سینک کامل</div>
                     <div class="wp-dorna-tab" data-tab="logs">لاگ خطاها</div>
                 </div>
 
@@ -533,6 +538,9 @@ class WP_Dorna_Admin
 
                         <div id="wp-dorna-import-status" class="wp-dorna-box" style="display:none; margin-top:15px;"></div>
                     </div>
+
+                    <!-- Full sync -->
+                    <?php $this->full_sync->render_tab(); ?>
 
                     <!-- Logs -->
                     <div id="tab-logs" class="wp-dorna-tab-content" style="display:none;">

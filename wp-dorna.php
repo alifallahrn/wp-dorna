@@ -27,6 +27,7 @@ define('WP_DORNA_OPTION_NAME', 'wp_dorna_settings');
 require_once WP_DORNA_PLUGIN_DIR . 'includes/class-wp-dorna.php';
 require_once WP_DORNA_PLUGIN_DIR . 'includes/class-wp-dorna-admin.php';
 require_once WP_DORNA_PLUGIN_DIR . 'includes/class-wp-dorna-api.php';
+require_once WP_DORNA_PLUGIN_DIR . 'includes/class-wp-dorna-full-sync.php';
 
 function wp_dorna_activate()
 {
@@ -49,6 +50,8 @@ function wp_dorna_deactivate()
     if ($retry_timestamp) {
         wp_unschedule_event($retry_timestamp, 'wp_dorna_retry_failed_orders_event');
     }
+
+    wp_clear_scheduled_hook(WP_Dorna_Full_Sync::CRON_HOOK);
 }
 register_deactivation_hook(__FILE__, 'wp_dorna_deactivate');
 
@@ -57,9 +60,12 @@ function wp_dorna_init()
     $wp_dorna = new WP_Dorna();
     $wp_dorna->init();
 
+    $wp_dorna_full_sync = new WP_Dorna_Full_Sync();
+    $wp_dorna_full_sync->init();
+
     if (is_admin()) {
         $wp_dorna_admin = new WP_Dorna_Admin();
-        $wp_dorna_admin->init();
+        $wp_dorna_admin->init($wp_dorna_full_sync);
     }
 }
 add_action('plugins_loaded', 'wp_dorna_init');

@@ -76,7 +76,7 @@ class WP_Dorna
      * Atomic through add_option (same approach as WP core's upgrade lock). A lock
      * older than $ttl is considered dead.
      */
-    private function acquire_lock($name, $ttl)
+    public function acquire_lock($name, $ttl)
     {
         $key = 'wp_dorna_lock_' . $name;
         $now = time();
@@ -94,7 +94,7 @@ class WP_Dorna
         return false;
     }
 
-    private function release_lock($name)
+    public function release_lock($name)
     {
         delete_option('wp_dorna_lock_' . $name);
     }
@@ -135,6 +135,10 @@ class WP_Dorna
 
     public function update_products()
     {
+        if (WP_Dorna_Full_Sync::is_running()) {
+            return;
+        }
+
         if (!$this->acquire_lock('products', 10 * MINUTE_IN_SECONDS)) {
             return;
         }
@@ -218,54 +222,12 @@ class WP_Dorna
             }
         } while ($has_more && $page <= self::MAX_SYNC_PAGES);
 
-        $stats = array('fetched' => count($dorna_products), 'updated' => 0, 'failed' => 0, 'stock_held' => 0, 'inactive' => 0);
+        $stats = array('fetched' => count($dorna_products));
 
         if (!empty($dorna_products) || !empty($inactive)) {
-            $woo_ids = $this->get_woo_ids_by_sku();
-
-            foreach ($inactive as $key => $sku) {
-                if (isset($woo_ids[$key])) {
-                    $stats['inactive']++;
-                    $this->log_error(sprintf('WP Dorna: product SKU %s is inactive in Dorna but still exists in the store (not changed).', $sku));
-                }
-            }
-
-            $pending_product_ids = !empty($dorna_products) ? $this->get_pending_invoice_product_ids() : array();
-            $currency            = get_woocommerce_currency();
-
-            foreach ($dorna_products as $key => $product) {
-                if (!isset($woo_ids[$key])) {
-                    continue;
-                }
-
-                foreach ($woo_ids[$key] as $woo_id) {
-                    // Woo already reduced the stock for an order Dorna has not received
-                    // yet: Dorna's older number would put the sold units back.
-                    $hold_stock = isset($pending_product_ids[$woo_id]);
-
-                    try {
-                        $wc_product = wc_get_product($woo_id);
-                        if (!$wc_product) {
-                            continue;
-                        }
-
-                        $this->apply_dorna_pricing($wc_product, $product, $currency);
-
-                        if ($hold_stock) {
-                            $stats['stock_held']++;
-                        } elseif (isset($product['stock']) && is_numeric($product['stock'])) {
-                            $wc_product->set_manage_stock(true);
-                            $wc_product->set_stock_quantity(wc_stock_amount($product['stock']));
-                        }
-
-                        $wc_product->save();
-                        $stats['updated']++;
-                    } catch (Throwable $e) {
-                        $stats['failed']++;
-                        $this->log_error(sprintf('WP Dorna: updating SKU %s (product #%d) failed: %s', $product['sku'], $woo_id, $e->getMessage()));
-                    }
-                }
-            }
+            $result = $this->apply_dorna_products($dorna_products, $inactive);
+            unset($result['matched']);
+            $stats = array_merge($stats, $result);
         }
 
         $synced_at = $server_time ? $server_time : $fallback_at;
@@ -280,9 +242,80 @@ class WP_Dorna
     }
 
     /**
+     * Writes a batch of Dorna products (keyed by normalized SKU) into WooCommerce.
+     * Shared by the minute cron and the full sync.
+     *
+     * @return array counters plus `matched`: normalized SKUs that exist in the store
+     */
+    public function apply_dorna_products(array $dorna_products, array $inactive = array())
+    {
+        $stats = array('updated' => 0, 'unchanged' => 0, 'failed' => 0, 'stock_held' => 0, 'inactive' => 0, 'missing' => 0, 'matched' => array());
+
+        $woo_ids = $this->get_woo_ids_by_sku();
+
+        foreach ($inactive as $key => $sku) {
+            if (isset($woo_ids[$key])) {
+                $stats['inactive']++;
+                $stats['matched'][] = $key;
+                $this->log_error(sprintf('WP Dorna: product SKU %s is inactive in Dorna but still exists in the store (not changed).', $sku));
+            }
+        }
+
+        $pending_product_ids = !empty($dorna_products) ? $this->get_pending_invoice_product_ids() : array();
+        $currency            = get_woocommerce_currency();
+
+        foreach ($dorna_products as $key => $product) {
+            if (!isset($woo_ids[$key])) {
+                $stats['missing']++;
+                continue;
+            }
+
+            $stats['matched'][] = $key;
+
+            if (count($woo_ids[$key]) > 1) {
+                $this->log_error(sprintf('WP Dorna: SKU "%s" is used by more than one product (%s).', $product['sku'], implode(', ', $woo_ids[$key])));
+            }
+
+            foreach ($woo_ids[$key] as $woo_id) {
+                // Woo already reduced the stock for an order Dorna has not received
+                // yet: Dorna's older number would put the sold units back.
+                $hold_stock = isset($pending_product_ids[$woo_id]);
+
+                try {
+                    $wc_product = wc_get_product($woo_id);
+                    if (!$wc_product) {
+                        continue;
+                    }
+
+                    $this->apply_dorna_pricing($wc_product, $product, $currency);
+
+                    if ($hold_stock) {
+                        $stats['stock_held']++;
+                    } elseif (isset($product['stock']) && is_numeric($product['stock'])) {
+                        $wc_product->set_manage_stock(true);
+                        $wc_product->set_stock_quantity(wc_stock_amount($product['stock']));
+                    }
+
+                    if ($wc_product->get_changes()) {
+                        $wc_product->save();
+                        $stats['updated']++;
+                    } else {
+                        $stats['unchanged']++;
+                    }
+                } catch (Throwable $e) {
+                    $stats['failed']++;
+                    $this->log_error(sprintf('WP Dorna: updating SKU %s (product #%d) failed: %s', $product['sku'], $woo_id, $e->getMessage()));
+                }
+            }
+        }
+
+        return $stats;
+    }
+
+    /**
      * Normalized SKU => [post ids] for every live product / variation.
      */
-    private function get_woo_ids_by_sku()
+    public function get_woo_ids_by_sku()
     {
         global $wpdb;
 
@@ -303,12 +336,6 @@ class WP_Dorna
                 continue;
             }
             $map[$key][] = (int) $row->post_id;
-        }
-
-        foreach ($map as $key => $ids) {
-            if (count($ids) > 1) {
-                $this->log_error(sprintf('WP Dorna: SKU "%s" is used by more than one product (%s).', $key, implode(', ', $ids)));
-            }
         }
 
         return $map;

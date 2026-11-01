@@ -1,0 +1,91 @@
+#wp-dorna-fs .wp-dorna-fs-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    margin-bottom: 10px;
+}
+
+#wp-dorna-fs .wp-dorna-fs-head strong {
+    font-size: 15px;
+}
+
+#wp-dorna-fs .wp-dorna-fs-head span {
+    color: #64748B;
+}
+
+#wp-dorna-fs .wp-dorna-fs-bar {
+    position: relative;
+    height: 22px;
+    background: #E5E7EB;
+    border-radius: 11px;
+    overflow: hidden;
+}
+
+#wp-dorna-fs .wp-dorna-fs-bar-fill {
+    height: 100%;
+    width: 0;
+    background: #2563EB;
+    transition: width 0.4s ease;
+}
+
+#wp-dorna-fs .wp-dorna-fs-bar > span {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 12px;
+    font-weight: 600;
+    color: #1E293B;
+}
+
+#wp-dorna-fs .wp-dorna-fs-stats {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(110px, 1fr));
+    gap: 10px;
+    margin: 15px 0;
+}
+
+#wp-dorna-fs .wp-dorna-fs-stats > div {
+    background: #F9FAFB;
+    border: 1px solid #E5E7EB;
+    border-radius: 8px;
+    padding: 10px 12px;
+}
+
+#wp-dorna-fs .wp-dorna-fs-stats span {
+    display: block;
+    font-size: 20px;
+    font-weight: 600;
+}
+
+#wp-dorna-fs .wp-dorna-fs-stats small {
+    color: #64748B;
+}
+
+#wp-dorna-fs .wp-dorna-fs-note {
+    color: #475569;
+    min-height: 1.5em;
+}
+
+#wp-dorna-fs .wp-dorna-fs-actions {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+
+#wp-dorna-fs .wp-dorna-fs-errors {
+    margin: 12px 0 0;
+    padding: 0;
+    list-style: none;
+    color: #B91C1C;
+    font-size: 12px;
+}
+
+#wp-dorna-fs details {
+    margin-top: 15px;
+}
+
+#wp-dorna-fs textarea {
+    width: 100%;
+}
