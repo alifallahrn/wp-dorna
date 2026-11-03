@@ -163,6 +163,7 @@ class InvoiceService
             'order_status'   => $order->get_status(),
             'order_note'     => $order->get_customer_note(),
             'payment_method' => $order->get_payment_method_title(),
+            'payment_method_id' => $order->get_payment_method(),
             'transaction_id' => $order->get_transaction_id(),
         );
     }
